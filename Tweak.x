@@ -110,6 +110,12 @@ static UISegmentedControl *BHT_findHomeSegmentControl(UIView *rootView) {
     return foundControl;
 }
 
+static UISegmentedControl *BHT_findSegmentedControlInView(UIView *rootView) {
+    // 現状ホームタイムラインの「おすすめ / フォロー中」しか探さないので、
+    // そのまま BHT_findHomeSegmentControl を使う
+    return BHT_findHomeSegmentControl(rootView);
+}
+
 static UISegmentedControl *BHT_findHomeSegmentControlInWindows(void) {
     UISegmentedControl *found = nil;
     for (UIWindow *window in UIApplication.sharedApplication.windows) {
@@ -257,6 +263,17 @@ static BOOL BHT_userIsFollowed(id object, BOOL *hasValue) {
     return NO;
 }
 
+// ラッパー: 「フォロー状態が取れない場合は NO 扱い」
+static BOOL BHT_isFollowingUser(id user) {
+    BOOL hasValue = NO;
+    BOOL isFollowed = BHT_userIsFollowed(user, &hasValue);
+    if (!hasValue) {
+        // 情報が取れない場合は「フォローしていない」とみなす
+        return NO;
+    }
+    return isFollowed;
+}
+
 static NSString *BHT_conversationAuthorForController(id controller) {
     if (!BHTConversationAuthorIDs) {
         BHTConversationAuthorIDs = [NSMapTable weakToStrongObjectsMapTable];
@@ -353,10 +370,9 @@ static BOOL BHT_shouldHideSearchTabItem(id itemViewModel, NSString *className) {
 // - ユーザーが青バッジ
 // - 自分がフォローしていない
 // - 返信（indexPath.row != 0）
-// という条件を満たしたセルを非表示にする
-static BOOL BHT_shouldHideBlueVerifiedReply(UIViewController *controller,
-                                            id status,
-                                            NSIndexPath *indexPath)
+static BOOL BHT_shouldHideBlueVerifiedReply(id status,
+                                            NSIndexPath *indexPath,
+                                            UIViewController *controller) // controller は今は未使用でもOK
 {
     if (![BHTManager hideBlueReplies]) {
         return NO;
@@ -386,6 +402,7 @@ static BOOL BHT_shouldHideBlueVerifiedReply(UIViewController *controller,
 
     return YES;
 }
+
 
 
 
