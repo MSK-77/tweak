@@ -138,6 +138,14 @@ static void BHT_applyFollowingTabPreference(UIView *rootView) {
         if (followingIndex > forYouIndex && followingIndex != NSNotFound) {
             followingIndex -= 1;
         }
+    } else if (segmentedControl.numberOfSegments > 1) {
+        // Fallback: drop the first segment if we can't positively identify "For you"
+        [segmentedControl removeSegmentAtIndex:0 animated:NO];
+        if (followingIndex == 0) {
+            followingIndex = 0;
+        } else if (followingIndex > 0) {
+            followingIndex -= 1;
+        }
     }
 
     NSInteger targetIndex = followingIndex != NSNotFound ? followingIndex : 0;
@@ -284,7 +292,8 @@ static BOOL BHT_shouldHideSearchTabItem(id item, NSString *className) {
     if ([item isKindOfClass:%c(_TtC10TwitterURT26URTTimelinePromptViewModel)]) {
         return YES;
     }
-    return NO;
+    // As a fallback, hide any non-status items in search to remove remaining trend/news modules.
+    return YES;
 }
 
 static BOOL BHT_shouldHideBlueVerifiedReply(UIViewController *controller, id item, NSIndexPath *indexPath) {
@@ -301,6 +310,9 @@ static BOOL BHT_shouldHideBlueVerifiedReply(UIViewController *controller, id ite
     }
 
     id status = BHT_safeValueForKey(item, @"status") ?: BHT_safeValueForKey(item, @"tweet") ?: item;
+    if (!status) {
+        return NO;
+    }
     id user = BHT_userFromStatus(status);
     NSString *userID = BHT_userIdentifierFromObject(user ?: status);
 
@@ -1334,7 +1346,9 @@ static void BHTApplyCopyButtonStyle(UIButton *copyButton, T1ProfileHeaderView *h
     NSString *class_name = NSStringFromClass([tweet classForCoder]);
     NSIndexPath *indexPath = [arg2 isKindOfClass:[NSIndexPath class]] ? arg2 : nil;
 
-    BOOL isSearchContext = [BHTManager hideSearchTrends] && BHT_isSearchTabController((UIViewController *)self);
+    NSString *location = [self respondsToSelector:@selector(adDisplayLocation)] ? [self adDisplayLocation] : nil;
+    BOOL locationIsSearch = [location isKindOfClass:[NSString class]] && ([location containsString:@"SEARCH"] || [location containsString:@"DISCOVER"]);
+    BOOL isSearchContext = [BHTManager hideSearchTrends] && (BHT_isSearchTabController((UIViewController *)self) || locationIsSearch);
     BOOL shouldHideSearchItem = isSearchContext && BHT_shouldHideSearchTabItem(tweet, class_name);
     BOOL shouldHideBlueReply = BHT_shouldHideBlueVerifiedReply((UIViewController *)self, tweet, indexPath);
 
@@ -1418,7 +1432,9 @@ static void BHTApplyCopyButtonStyle(UIButton *copyButton, T1ProfileHeaderView *h
     NSString *class_name = NSStringFromClass([tweet classForCoder]);
     NSIndexPath *indexPath = [arg2 isKindOfClass:[NSIndexPath class]] ? arg2 : nil;
 
-    BOOL isSearchContext = [BHTManager hideSearchTrends] && BHT_isSearchTabController((UIViewController *)self);
+    NSString *location = [self respondsToSelector:@selector(adDisplayLocation)] ? [self adDisplayLocation] : nil;
+    BOOL locationIsSearch = [location isKindOfClass:[NSString class]] && ([location containsString:@"SEARCH"] || [location containsString:@"DISCOVER"]);
+    BOOL isSearchContext = [BHTManager hideSearchTrends] && (BHT_isSearchTabController((UIViewController *)self) || locationIsSearch);
     BOOL shouldHideSearchItem = isSearchContext && BHT_shouldHideSearchTabItem(tweet, class_name);
     BOOL shouldHideBlueReply = BHT_shouldHideBlueVerifiedReply((UIViewController *)self, tweet, indexPath);
 

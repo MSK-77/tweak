@@ -185,6 +185,8 @@
 
 "HIDE_TREND_VIDEOS_OPTION_TITLE" = "トレンド動画を非表示";
 "HIDE_TREND_VIDEOS_OPTION_DETAIL_TITLE" = "検索メニューからトレンド動画を非表示にします。";
+"HIDE_SEARCH_TRENDS_TITLE" = "検索のトレンドを隠す";
+"HIDE_SEARCH_TRENDS_DETAIL_TITLE" = "検索タブのFor you／トレンド欄を非表示にします。";
 
 
 /*Messages*/
@@ -492,3 +494,8 @@
 
 "notif_Repost_old" = "Repost";
 "notif_Retweet_new" = "リツイート";
+
+"HIDE_BLUE_REPLIES_TITLE" = "青バッジ返信を非表示";
+"HIDE_BLUE_REPLIES_DETAIL_TITLE" = "フォローしていない青バッジアカウントの返信（投稿主本人を除く）を隠します。";
+"HIDE_SEARCH_TRENDS_TITLE" = "検索のトレンドを隠す";
+"HIDE_SEARCH_TRENDS_DETAIL_TITLE" = "検索タブのFor you/トレンド欄を非表示にします。";
