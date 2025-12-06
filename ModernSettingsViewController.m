@@ -1750,6 +1750,14 @@ static UIFont *TwitterChirpFont(TwitterFontStyle style) {
     ];
 }
 
+- (void)switchChanged:(UISwitch *)sender {
+    NSString *key = objc_getAssociatedObject(sender, @"prefKey");
+    if (!key) return;
+
+    [[NSUserDefaults standardUserDefaults] setBool:sender.isOn forKey:key];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+}
+
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     return self.settings.count;
 }
