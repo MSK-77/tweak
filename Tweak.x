@@ -140,6 +140,9 @@ static void BHT_applyFollowingTabPreferenceForController(UIViewController *contr
 
     UISegmentedControl *segmentedControl = BHT_findSegmentedControlInView(controller.view);
     if (!segmentedControl) {
+        segmentedControl = BHT_findHomeSegmentControlInWindows();
+    }
+    if (!segmentedControl) {
         return;
     }
 
@@ -362,6 +365,19 @@ static BOOL BHT_shouldHideSearchTabItem(id itemViewModel, NSString *className) {
     // 新方式では TFNTableView 自体を hidden にするので、
     // データレベルでは何も隠さない
     return NO;
+    NSString *resolvedClassName = className ?: (itemViewModel ? NSStringFromClass([itemViewModel classForCoder]) : nil);
+    if (![resolvedClassName isKindOfClass:[NSString class]] || resolvedClassName.length == 0) {
+        return NO;
+    }
+
+    BOOL isTrendItem = [resolvedClassName containsString:@"URTTimelineTrendViewModel"];
+    BOOL isModuleChrome = ([resolvedClassName containsString:@"URTModuleHeaderViewModel"] ||
+                           [resolvedClassName containsString:@"URTModuleFooterViewModel"]);
+    BOOL isSuggestedAccount = ([resolvedClassName containsString:@"URTTimelineUserItemViewModel"] ||
+                               [resolvedClassName containsString:@"URTTimelineCarouselViewModel"]);
+    BOOL isSuggestedTopic = [resolvedClassName containsString:@"URTTimelineTopic"];
+
+    return (isTrendItem || isModuleChrome || isSuggestedAccount || isSuggestedTopic);
 }
 
 
@@ -381,15 +397,28 @@ static BOOL BHT_shouldHideBlueVerifiedReply(id status,
         return NO;
     }
 
+    id user = BHT_userFromStatus(status);
+    NSString *userID = BHT_userIdentifierFromObject(user);
+
     // ルートツイート（会話の1つ目）は消さない
     if (indexPath && indexPath.row == 0) {
+        // Track the conversation owner for this controller
+        if (controller && userID.length > 0) {
+            BHT_storeConversationAuthorForController(controller, userID);
+        }
         return NO;
     }
 
-    id user = BHT_userFromStatus(status);
     if (!user) {
         return NO;
     }
+
+    NSString *conversationAuthorID = controller ? BHT_conversationAuthorForController(controller) : nil;
+    if (conversationAuthorID.length > 0 && userID.length > 0 && [userID isEqualToString:conversationAuthorID]) {
+        // Never hide replies from the conversation author
+        return NO;
+    }
+
 
     if (!BHT_userIsBlueVerified(user)) {
         return NO;
@@ -1399,7 +1428,6 @@ static void BHTApplyCopyButtonStyle(UIButton *copyButton, T1ProfileHeaderView *h
 
 %hook TFNItemsDataViewController
 - (id)tableViewCellForItem:(id)arg1 atIndexPath:(id)arg2 {
-    UITableViewCell *_orig = %orig;
     id tweet = [self itemAtIndexPath:arg2];
     NSString *class_name = NSStringFromClass([tweet classForCoder]);
     NSIndexPath *indexPath = [arg2 isKindOfClass:[NSIndexPath class]] ? arg2 : nil;
@@ -1407,6 +1435,12 @@ static void BHTApplyCopyButtonStyle(UIButton *copyButton, T1ProfileHeaderView *h
     NSString *location = [self respondsToSelector:@selector(adDisplayLocation)] ? [self adDisplayLocation] : nil;
     BOOL isSearchContext = [BHTManager hideSearchTrends] && BHT_isLikelySearchContext((UIViewController *)self, location);
     BOOL shouldHideSearchItem = isSearchContext && BHT_shouldHideSearchTabItem(tweet, class_name);
+
+    if (shouldHideSearchItem) {
+        return nil;
+    }
+
+    UITableViewCell *_orig = %orig;
 
     BOOL shouldHideBlueReply = NO;
     @try {
