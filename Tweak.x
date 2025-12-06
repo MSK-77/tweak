@@ -87,6 +87,23 @@ static BOOL BHT_textMatchesForYou(NSString *text) {
     return [trimmed containsString:@"for you"] || [trimmed isEqualToString:@"foryou"] || [text containsString:@"おすすめ"] || [text containsString:@"おすすめ\n"];
 }
 
+static BOOL BHT_textMatchesTrendTab(NSString *text) {
+    if (!text || ![text isKindOfClass:[NSString class]]) return NO;
+    NSString *trimmed = [[text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+    if (trimmed.length == 0) return NO;
+
+    // 英語・日本語どちらもざっくりカバー
+    if ([trimmed containsString:@"trending"] ||
+        [trimmed containsString:@"trend"]) {
+        return YES;
+    }
+    if ([text containsString:@"トレンド"] ||
+        [text containsString:@"トレンド\n"]) {
+        return YES;
+    }
+    return NO;
+}
+
 static BOOL BHT_textMatchesFollowing(NSString *text) {
     if (!text || ![text isKindOfClass:[NSString class]]) return NO;
     NSString *trimmed = [[text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
@@ -115,6 +132,38 @@ static UISegmentedControl *BHT_findHomeSegmentControl(UIView *rootView) {
     });
     return foundControl;
 }
+
+// 検索タブの「For you / トレンド / …」セグメントを探す
+static UISegmentedControl *BHT_findSearchSegmentControl(UIView *rootView) {
+    __block UISegmentedControl *foundControl = nil;
+
+    BH_EnumerateSubviewsRecursively(rootView, ^(UIView *currentView) {
+        if (foundControl) return;
+        if (![currentView isKindOfClass:[UISegmentedControl class]]) return;
+
+        UISegmentedControl *seg = (UISegmentedControl *)currentView;
+        BOOL hasForYou    = NO;
+        BOOL hasTrending  = NO;
+
+        for (NSInteger idx = 0; idx < seg.numberOfSegments; idx++) {
+            NSString *title = [seg titleForSegmentAtIndex:idx];
+            if (BHT_textMatchesForYou(title)) {
+                hasForYou = YES;
+            }
+            if (BHT_textMatchesTrendTab(title)) {
+                hasTrending = YES;
+            }
+        }
+
+        // 「おすすめ/For you」と「トレンド」両方を持つセグメントを検索タブ用とみなす
+        if (hasForYou && hasTrending) {
+            foundControl = seg;
+        }
+    });
+
+    return foundControl;
+}
+
 
 static UISegmentedControl *BHT_findSegmentedControlInView(UIView *rootView) {
     // 現状ホームタイムラインの「おすすめ / フォロー中」しか探さないので、
@@ -187,6 +236,56 @@ static void BHT_applyFollowingTabPreferenceForController(UIViewController *contr
     }
 }
 
+// 検索タブを開いたときに「トレンド」タブを自動選択
+static void BHT_applySearchTrendTabPreferenceForController(UIViewController *controller) {
+    // 「検索トレンドを隠す」がONのときだけ動くようにしておく（好みで別フラグにしてもOK）
+    if (![BHTManager hideSearchTrends]) {
+        return;
+    }
+    if (!controller) {
+        return;
+    }
+
+    __block BOOL applied = NO;
+    void (^applyBlock)(void) = ^{
+        UISegmentedControl *seg = BHT_findSearchSegmentControl(controller.view);
+        if (!seg) {
+            return;
+        }
+
+        NSInteger trendIndex = NSNotFound;
+        for (NSInteger i = 0; i < seg.numberOfSegments; i++) {
+            NSString *title = [seg titleForSegmentAtIndex:i];
+            if (BHT_textMatchesTrendTab(title)) {
+                trendIndex = i;
+                break;
+            }
+        }
+
+        if (trendIndex == NSNotFound) {
+            return;
+        }
+
+        if (seg.selectedSegmentIndex == trendIndex) {
+            applied = YES;
+            return;
+        }
+
+        seg.selectedSegmentIndex = trendIndex;
+        [seg sendActionsForControlEvents:UIControlEventValueChanged];
+        applied = YES;
+    };
+
+    applyBlock();
+
+    if (!applied) {
+        // レイアウトがまだ終わってないケース用に、少し遅延してもう一度試す
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            applyBlock();
+        });
+    }
+}
 
 
 static id BHT_safeValueForKey(id object, NSString *key) {
@@ -1003,7 +1102,7 @@ static void batchSwizzlingOnClass(Class cls, NSArray<NSString*>*origSelectors, I
 
 - (void)setTabBarScrolling:(BOOL)scrolling {
     if ([BHTManager stopHidingTabBar]) {
-        %orig(NO); // Force scrolling to NO if fading is prevented
+        %orig(NO);
     } else {
         %orig(scrolling);
     }
@@ -1018,7 +1117,25 @@ static void batchSwizzlingOnClass(Class cls, NSArray<NSString*>*origSelectors, I
         }
     }
 }
+
+- (void)viewDidAppear:(BOOL)animated {
+    %orig(animated);
+
+    // 選択中タブが「検索/Explore」系なら、トレンドタブを自動選択
+    UIViewController *selected = self.selectedViewController;
+    if ([selected isKindOfClass:[UINavigationController class]]) {
+        selected = ((UINavigationController *)selected).visibleViewController ?: selected;
+    }
+
+    if (BHT_isSearchTabController(selected)) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            BHT_applySearchTrendTabPreferenceForController(selected);
+        });
+    }
+}
+
 %end
+
 
 %hook T1DirectMessageConversationEntriesViewController
 - (void)viewDidLoad {
