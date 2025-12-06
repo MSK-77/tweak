@@ -78,14 +78,14 @@ static BOOL BHT_textMatchesForYou(NSString *text) {
     if (!text || ![text isKindOfClass:[NSString class]]) return NO;
     NSString *trimmed = [[text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
     if (trimmed.length == 0) return NO;
-    return [trimmed containsString:@"for you"] || [trimmed isEqualToString:@"foryou"] || [text containsString:@"おすすめ"];
+    return [trimmed containsString:@"for you"] || [trimmed isEqualToString:@"foryou"] || [text containsString:@"おすすめ"] || [text containsString:@"おすすめ\n"];
 }
 
 static BOOL BHT_textMatchesFollowing(NSString *text) {
     if (!text || ![text isKindOfClass:[NSString class]]) return NO;
     NSString *trimmed = [[text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
     if (trimmed.length == 0) return NO;
-    return [trimmed containsString:@"following"] || [text containsString:@"フォロー"];
+    return [trimmed containsString:@"following"] || [text containsString:@"フォロー"] || [text containsString:@"フォロー中"] || [text containsString:@"フォロー中\n"];
 }
 
 static UISegmentedControl *BHT_findHomeSegmentControl(UIView *rootView) {
@@ -299,12 +299,21 @@ static BOOL BHT_isSearchTabController(UIViewController *controller) {
 }
 
 static BOOL BHT_isLikelySearchContext(UIViewController *controller, NSString *location) {
-    BOOL locationIsSearch = [location isKindOfClass:[NSString class]] && ([location containsString:@"SEARCH"] || [location containsString:@"DISCOVER"]);
+    BOOL locationIsSearch = [location isKindOfClass:[NSString class]] &&
+        ([location containsString:@"SEARCH"] || [location containsString:@"DISCOVER"]);
+    if (locationIsSearch) {
+        return YES;
+    }
+    if (!BHT_isSearchTabController(controller)) {
+        return NO;
+    }
     NSString *className = NSStringFromClass([controller class]);
     NSString *lowerClass = [className lowercaseString];
     BOOL isSettingsScreen = [lowerClass containsString:@"settings"];
-    BOOL classLooksSearchy = ([lowerClass containsString:@"search"] || [lowerClass containsString:@"explore"]) && !isSettingsScreen;
-    return (BHT_isSearchTabController(controller) && !isSettingsScreen) || locationIsSearch || classLooksSearchy;
+    if (isSettingsScreen) {
+        return NO;
+    }
+    return YES;
 }
 
 static BOOL BHT_shouldHideSearchTabItem(id item, NSString *className) {
@@ -312,15 +321,27 @@ static BOOL BHT_shouldHideSearchTabItem(id item, NSString *className) {
         return NO;
     }
     NSString *lowercaseName = [className lowercaseString];
-    if ([lowercaseName containsString:@"trend"] || [lowercaseName containsString:@"carousel"] || [lowercaseName containsString:@"moduleheader"] || [lowercaseName containsString:@"modulefooter"] || [lowercaseName containsString:@"topic"] || [lowercaseName containsString:@"eventsummary"] || [lowercaseName containsString:@"messageitem"]) {
+    if ([lowercaseName containsString:@"trend"] ||
+        [lowercaseName containsString:@"carousel"] ||
+        [lowercaseName containsString:@"moduleheader"] ||
+        [lowercaseName containsString:@"modulefooter"] ||
+        [lowercaseName containsString:@"topic"] ||
+        [lowercaseName containsString:@"eventsummary"] ||
+        [lowercaseName containsString:@"messageitem"]) {
         return YES;
     }
     if ([item isKindOfClass:%c(_TtC10TwitterURT26URTTimelinePromptViewModel)]) {
         return YES;
     }
-    // As a fallback, hide any non-status items in search to remove remaining trend/news modules.
-    return YES;
+    if ([lowercaseName containsString:@"query"] ||
+        [lowercaseName containsString:@"recent"] ||
+        [lowercaseName containsString:@"suggest"] ||
+        [lowercaseName containsString:@"history"]) {
+        return NO;
+    }
+    return NO;
 }
+
 
 static BOOL BHT_shouldHideBlueVerifiedReply(UIViewController *controller, id item, NSIndexPath *indexPath) {
     @try {
@@ -364,11 +385,7 @@ static BOOL BHT_shouldHideBlueVerifiedReply(UIViewController *controller, id ite
 
         BOOL hasFollowInfo = NO;
         BOOL isFollowed = BHT_userIsFollowed(user ?: status, &hasFollowInfo);
-        if (!hasFollowInfo) {
-            return NO;
-        }
-
-        if (isFollowed) {
+        if (hasFollowInfo && isFollowed) {
             return NO;
         }
 
