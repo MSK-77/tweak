@@ -27,6 +27,12 @@
 #import <Preferences/PSSpecifier.h>
 #import "ModernSettingsViewController.h"
 
+// 検索タブのトレンド表示ビューは UIView のサブクラスなので、
+// hidden プロパティ等を安全に扱えるように明示しておく
+@interface TFNScrollingHorizontalLabelCollectionView : UIView
+@end
+
+
 @class T1SettingsViewController;
 
 // Forward declarations
@@ -137,7 +143,6 @@ static void BHT_applyFollowingTabPreferenceForController(UIViewController *contr
     if (!controller) {
         return;
     }
-
     __block BOOL applied = NO;
     void (^applyBlock)(void) = ^{
         UISegmentedControl *segmentedControl = BHT_findSegmentedControlInView(controller.view);
