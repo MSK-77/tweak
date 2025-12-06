@@ -419,8 +419,8 @@
 /*Deprecated*/
 "TRUSTED_FRIENDS_OPTION_TITLE" = "Twitterサークル";
 
-"ALWAYS_FOLLOWING_PAGE_OPTION_TITLE" = "おすすめタブを非表示";
-"ALWAYS_FOLLOWING_PAGE_OPTION_DETAIL_TITLE" = "Twitterを起動した際に [フォロー中] タブを開きます。";
+"ALWAYS_FOLLOWING_PAGE_OPTION_TITLE" = "フォロー中タブを優先表示";
+"ALWAYS_FOLLOWING_PAGE_OPTION_DETAIL_TITLE" = "Twitterを起動した際に、ホームの［フォロー中］タブを自動で選択します。";
 
 "DN_MODULAR_SEARCH_OPTION_TITLE" = "より良いメッセージ検索機能";
 "DN_MODULAR_SEARCH_OPTION_DETAIL_TITLE" = "ダイレクトメッセージを高度なフィルターで検索します。";

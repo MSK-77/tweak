@@ -148,31 +148,28 @@ static void BHT_applyFollowingTabPreferenceForController(UIViewController *contr
         }
     }
 
-    NSInteger previousSelection = segmentedControl.selectedSegmentIndex;
-
-    if (forYouIndex != NSNotFound) {
-        [segmentedControl removeSegmentAtIndex:forYouIndex animated:NO];
-        if (followingIndex > forYouIndex && followingIndex != NSNotFound) {
-            followingIndex -= 1;
-        }
-    } else if (segmentedControl.numberOfSegments > 1) {
-        // Fallback: drop the first segment if we can't positively identify "For you"
-        [segmentedControl removeSegmentAtIndex:0 animated:NO];
-        if (followingIndex == 0) {
-            followingIndex = 0;
-        } else if (followingIndex > 0) {
-            followingIndex -= 1;
-        }
+    // 目標インデックス：フォロー中があればそこ、なければ現在値、さらにダメなら 0
+    NSInteger targetIndex = followingIndex;
+    if (targetIndex == NSNotFound) {
+        targetIndex = segmentedControl.selectedSegmentIndex;
+    }
+    if (targetIndex == NSNotFound) {
+        targetIndex = 0;
     }
 
-    NSInteger targetIndex = followingIndex != NSNotFound ? followingIndex : 0;
-    if (targetIndex >= 0 && targetIndex < segmentedControl.numberOfSegments) {
-        segmentedControl.selectedSegmentIndex = targetIndex;
-        if (previousSelection != targetIndex) {
-            [segmentedControl sendActionsForControlEvents:UIControlEventValueChanged];
-        }
+    if (targetIndex < 0 || targetIndex >= segmentedControl.numberOfSegments) {
+        return;
+    }
+
+    NSInteger previousSelection = segmentedControl.selectedSegmentIndex;
+    segmentedControl.selectedSegmentIndex = targetIndex;
+
+    // 選択が変わったときだけイベントを飛ばす
+    if (previousSelection != targetIndex) {
+        [segmentedControl sendActionsForControlEvents:UIControlEventValueChanged];
     }
 }
+
 
 static id BHT_safeValueForKey(id object, NSString *key) {
     @try {
@@ -317,14 +314,9 @@ static BOOL BHT_isLikelySearchContext(UIViewController *controller, NSString *lo
 }
 
 // 検索タブ内の「トレンド / ニュース / おすすめモジュール」を隠すかどうか
-static BOOL BHT_shouldHideSearchTabItem(id itemViewModel, UIViewController *controller)
+static BOOL BHT_shouldHideSearchTabItem(id itemViewModel, NSString *className)
 {
     if (![BHTManager hideSearchTrends]) {
-        return NO;
-    }
-
-    // 検索画面っぽくないコンテキストなら何もしない
-    if (!BHT_isLikelySearchContext(controller)) {
         return NO;
     }
 
@@ -333,9 +325,8 @@ static BOOL BHT_shouldHideSearchTabItem(id itemViewModel, UIViewController *cont
     }
 
     Class cls = [itemViewModel classForCoder];
-    NSString *className = NSStringFromClass(cls);
     if (className.length == 0) {
-        return NO;
+        className = NSStringFromClass(cls);
     }
 
     NSString *lower = className.lowercaseString;
@@ -377,7 +368,7 @@ static BOOL BHT_shouldHideSearchTabItem(id itemViewModel, UIViewController *cont
     }
 
     // 5) フォールバック:
-    //   ・検索タブ内の「ツイートでもユーザーでも履歴でもなさそうなモジュール」は非表示
+    //   ・ツイートでもユーザーでも履歴でもなさそうなモジュールは非表示
     return YES;
 }
 
@@ -1472,7 +1463,7 @@ static void BHTApplyCopyButtonStyle(UIButton *copyButton, T1ProfileHeaderView *h
 
     BOOL shouldHideBlueReply = NO;
     @try {
-        shouldHideBlueReply = BHT_shouldHideBlueVerifiedReply((UIViewController *)self, tweet, indexPath);
+        shouldHideBlueReply = BHT_shouldHideBlueVerifiedReply(tweet, indexPath, (UIViewController *)self);
     } @catch (NSException *e) {
         NSLog(@"[BHTwitter] hideBlueReplies caught at cellForItem: %@", e);
         shouldHideBlueReply = NO;
@@ -1564,7 +1555,7 @@ static void BHTApplyCopyButtonStyle(UIButton *copyButton, T1ProfileHeaderView *h
 
     BOOL shouldHideBlueReply = NO;
     @try {
-        shouldHideBlueReply = BHT_shouldHideBlueVerifiedReply((UIViewController *)self, tweet, indexPath);
+        shouldHideBlueReply = BHT_shouldHideBlueVerifiedReply(tweet, indexPath, (UIViewController *)self);
     } @catch (NSException *e) {
         NSLog(@"[BHTwitter] hideBlueReplies caught at heightForRow: %@", e);
         shouldHideBlueReply = NO;
