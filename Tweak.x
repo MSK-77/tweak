@@ -1121,16 +1121,30 @@ static void batchSwizzlingOnClass(Class cls, NSArray<NSString*>*origSelectors, I
 - (void)viewDidAppear:(BOOL)animated {
     %orig(animated);
 
-    // 選択中タブが「検索/Explore」系なら、トレンドタブを自動選択
-    UIViewController *selected = self.selectedViewController;
-    if ([selected isKindOfClass:[UINavigationController class]]) {
-        selected = ((UINavigationController *)selected).visibleViewController ?: selected;
-    }
+    @try {
+        // 設定が OFF なら何もしない
+        if (![BHTManager hideSearchTrends]) {
+            return;
+        }
 
-    if (BHT_isSearchTabController(selected)) {
+        // いま表示中の最前面 VC をざっくり取得
+        UIWindow *window = self.view.window ?: BHT_activeKeyWindow();
+        if (!window) {
+            return;
+        }
+
+        UIViewController *root = window.rootViewController;
+        UIViewController *top  = BHT_topViewController(root);
+        if (!top) {
+            return;
+        }
+
+        // 「検索 / Explore」系画面っぽければタブをトレンド側に切り替える
         dispatch_async(dispatch_get_main_queue(), ^{
-            BHT_applySearchTrendTabPreferenceForController(selected);
+            BHT_applySearchTrendTabPreferenceForController(top);
         });
+    } @catch (__unused NSException *e) {
+        // ここでクラッシュしないように握りつぶしておく
     }
 }
 
