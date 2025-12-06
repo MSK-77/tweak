@@ -138,35 +138,48 @@ static void BHT_applyFollowingTabPreferenceForController(UIViewController *contr
         return;
     }
 
-    UISegmentedControl *segmentedControl = BHT_findSegmentedControlInView(controller.view);
-    if (!segmentedControl) {
-        segmentedControl = BHT_findHomeSegmentControlInWindows();
-    }
-    if (!segmentedControl) {
-        return;
-    }
-
-    NSInteger followingIndex = NSNotFound;
-    for (NSInteger i = 0; i < segmentedControl.numberOfSegments; i++) {
-        NSString *title = [segmentedControl titleForSegmentAtIndex:i];
-        if (BHT_textMatchesFollowing(title)) {
-            followingIndex = i;
-            break;
+    __block BOOL applied = NO;
+    void (^applyBlock)(void) = ^{
+        UISegmentedControl *segmentedControl = BHT_findSegmentedControlInView(controller.view);
+        if (!segmentedControl) {
+            segmentedControl = BHT_findHomeSegmentControlInWindows();
         }
-    }
+        if (!segmentedControl) {
+            return;
+        }
 
-    if (followingIndex == NSNotFound) {
-        // 「フォロー中」セグメントが無い場合は何もしない
-        return;
-    }
+        NSInteger followingIndex = NSNotFound;
+        for (NSInteger i = 0; i < segmentedControl.numberOfSegments; i++) {
+            NSString *title = [segmentedControl titleForSegmentAtIndex:i];
+            if (BHT_textMatchesFollowing(title)) {
+                followingIndex = i;
+                break;
+            }
+        }
 
-    if (segmentedControl.selectedSegmentIndex == followingIndex) {
-        // 既にフォロー中なら何もしない
-        return;
-    }
+        if (followingIndex == NSNotFound) {
+            // 「フォロー中」セグメントが無い場合は何もしない
+            return;
+        }
 
-    segmentedControl.selectedSegmentIndex = followingIndex;
-    [segmentedControl sendActionsForControlEvents:UIControlEventValueChanged];
+        if (segmentedControl.selectedSegmentIndex == followingIndex) {
+            // 既にフォロー中なら何もしない
+            applied = YES;
+            return;
+        }
+
+        segmentedControl.selectedSegmentIndex = followingIndex;
+        [segmentedControl sendActionsForControlEvents:UIControlEventValueChanged];
+        applied = YES;
+    };
+
+    applyBlock();
+
+    if (!applied) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            applyBlock();
+        });
+    }
 }
 
 
@@ -1450,7 +1463,11 @@ static void BHTApplyCopyButtonStyle(UIButton *copyButton, T1ProfileHeaderView *h
         shouldHideBlueReply = NO;
     }
 
-    if (shouldHideSearchItem || shouldHideBlueReply) {
+    if (shouldHideBlueReply) {
+        return nil;
+    }
+
+    if (shouldHideSearchItem) {
         [_orig setHidden:true];
     }
 
@@ -5139,13 +5156,47 @@ static NSBundle *BHBundle() {
 
         UITextField *searchField = BHT_findSearchTextFieldInView(vc.view);
         BOOL hasQuery = (searchField && searchField.text.length > 0);
+        BOOL isEditing = (searchField && searchField.isFirstResponder);
 
-        // クエリが空のとき（＝検索トップ・トレンド画面）は隠す
-        // クエリがあるとき（検索中）は表示
-        self.hidden = !hasQuery;
+        // トレンド/おすすめ部分のみ隠したいので、
+        // 1) 検索バーに文字が無く、
+        // 2) まだ検索バーが編集状態に入っていない（ホーム表示直後）
+        // という場合だけ隠す
+        BOOL shouldHide = (!hasQuery && !isEditing);
+        self.hidden = shouldHide;
     }
     @catch (__unused NSException *e) {
         // 何かあってもクラッシュしないように
+    }
+}
+
+%end
+
+// トレンド画面上部の水平ラベル群（おすすめトピックなど）を隠す
+%hook TFNScrollingHorizontalLabelCollectionView
+
+- (void)layoutSubviews {
+    %orig;
+
+    @try {
+        if (![BHTManager hideSearchTrends]) {
+            return;
+        }
+
+        UIViewController *vc = BHT_viewControllerForView(self);
+        if (!BHT_isSearchRootController(vc)) {
+            return;
+        }
+
+        UITextField *searchField = BHT_findSearchTextFieldInView(vc.view);
+        BOOL hasQuery = (searchField && searchField.text.length > 0);
+        BOOL isEditing = (searchField && searchField.isFirstResponder);
+
+        // 検索トップでのみ隠す。検索中や検索履歴表示中は表示する。
+        self.hidden = (!hasQuery && !isEditing);
+    }
+    @catch (__unused NSException *e) {
+        // fail-safe
     }
 }
 
