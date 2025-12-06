@@ -380,33 +380,52 @@ static BOOL BHT_isLikelySearchContext(UIViewController *controller, NSString *lo
 
 // 検索タブ内の「トレンド / ニュース / おすすめモジュール」を隠すかどうか
 static BOOL BHT_shouldHideSearchTabItem(id itemViewModel, NSString *className) {
-    // 新方式では TFNTableView 自体を hidden にするので、
-    // データレベルでは何も隠さない
-    return NO;
-    NSString *resolvedClassName = className ?: (itemViewModel ? NSStringFromClass([itemViewModel classForCoder]) : nil);
+    // ここでは「どのクラスを隠すか」だけを見る。
+    // 実際に検索タブかどうかの判定や hideSearchTrends のフラグチェックは
+    // 呼び出し側（TFNItemsDataViewController）でやっている。
+
+    NSString *resolvedClassName = className;
+    if (!resolvedClassName && itemViewModel) {
+        resolvedClassName = NSStringFromClass([itemViewModel classForCoder]);
+    }
     if (![resolvedClassName isKindOfClass:[NSString class]] || resolvedClassName.length == 0) {
         return NO;
     }
 
-    BOOL isTrendItem = [resolvedClassName containsString:@"URTTimelineTrendViewModel"];
-    BOOL isModuleChrome = ([resolvedClassName containsString:@"URTModuleHeaderViewModel"] ||
-                           [resolvedClassName containsString:@"URTModuleFooterViewModel"]);
-    BOOL isSuggestedAccount = ([resolvedClassName containsString:@"URTTimelineUserItemViewModel"] ||
-                               [resolvedClassName containsString:@"URTTimelineCarouselViewModel"]);
-    BOOL isSuggestedTopic = [resolvedClassName containsString:@"URTTimelineTopic"];
+    NSString *lower = [resolvedClassName lowercaseString];
 
-    return (isTrendItem || isModuleChrome || isSuggestedAccount || isSuggestedTopic);
+    // ---- ここで「残したいもの」を先に除外する ----
+    // 検索履歴 / 検索候補 / 実際のクエリ関連っぽいものは残す
+    if ([lower containsString:@"recentsearch"] ||
+        [lower containsString:@"recent_search"] ||
+        [lower containsString:@"history"] ||
+        [lower containsString:@"suggest"] ||     // サジェスト系
+        [lower containsString:@"typeahead"] ||   // 予測入力系
+        [lower containsString:@"query"]) {       // クエリ行
+        return NO;
+    }
+
+    // ---- ここから「消したいもの」 ----
+    // トレンド・トピック・ニュース・おすすめアカウント等の URT モジュール。
+    BOOL isTrendItem       = [lower containsString:@"urttimelinetrendviewmodel"];
+    BOOL isModuleChrome    = ([lower containsString:@"urtmoduleheaderviewmodel"] ||
+                              [lower containsString:@"urtmodulefooterviewmodel"]);
+    BOOL isSuggestedAccount = ([lower containsString:@"urttimelineuseritemviewmodel"] ||
+                               [lower containsString:@"urttimelinecarouselviewmodel"]);
+    BOOL isSuggestedTopic  = [lower containsString:@"urttimelinetopic"];
+
+    if (isTrendItem || isModuleChrome || isSuggestedAccount || isSuggestedTopic) {
+        return YES;  // ← これらは隠す
+    }
+
+    // それ以外は触らない（誤爆防止）
+    return NO;
 }
 
 
-// 青バッジ返信非表示（シンプル版）
-// - 設定ON
-// - ユーザーが青バッジ
-// - 自分がフォローしていない
-// - 返信（indexPath.row != 0）
-static BOOL BHT_shouldHideBlueVerifiedReply(id status,
-                                            NSIndexPath *indexPath,
-                                            UIViewController *controller) // controller は今は未使用でもOK
+
+// 青バッジ返信を隠すかどうか（会話ビュー専用）
+static BOOL BHT_shouldHideBlueVerifiedReply(id status, NSIndexPath *indexPath)
 {
     if (![BHTManager hideBlueReplies]) {
         return NO;
@@ -415,40 +434,30 @@ static BOOL BHT_shouldHideBlueVerifiedReply(id status,
         return NO;
     }
 
-    id user = BHT_userFromStatus(status);
-    NSString *userID = BHT_userIdentifierFromObject(user);
-
-    // ルートツイート（会話の1つ目）は消さない
+    // ルートツイート（1行目）は絶対に消さない
     if (indexPath && indexPath.row == 0) {
-        // Track the conversation owner for this controller
-        if (controller && userID.length > 0) {
-            BHT_storeConversationAuthorForController(controller, userID);
-        }
         return NO;
     }
 
+    id user = BHT_userFromStatus(status);
     if (!user) {
         return NO;
     }
 
-    NSString *conversationAuthorID = controller ? BHT_conversationAuthorForController(controller) : nil;
-    if (conversationAuthorID.length > 0 && userID.length > 0 && [userID isEqualToString:conversationAuthorID]) {
-        // Never hide replies from the conversation author
-        return NO;
-    }
-
-
+    // 青バッジでない→対象外
     if (!BHT_userIsBlueVerified(user)) {
         return NO;
     }
 
+    // 自分がフォローしているユーザー→表示を残す
     if (BHT_isFollowingUser(user)) {
-        // 自分がフォローしている青バッジは残す
         return NO;
     }
 
+    // ここまで来たら「青バッジ & 非フォロー」なので隠す
     return YES;
 }
+
 
 
 
@@ -1462,7 +1471,7 @@ static void BHTApplyCopyButtonStyle(UIButton *copyButton, T1ProfileHeaderView *h
 
     BOOL shouldHideBlueReply = NO;
     @try {
-        shouldHideBlueReply = BHT_shouldHideBlueVerifiedReply(tweet, indexPath, (UIViewController *)self);
+        shouldHideBlueReply = BHT_shouldHideBlueVerifiedReply(tweet, indexPath);
     } @catch (NSException *e) {
         NSLog(@"[BHTwitter] hideBlueReplies caught at cellForItem: %@", e);
         shouldHideBlueReply = NO;
@@ -1558,7 +1567,7 @@ static void BHTApplyCopyButtonStyle(UIButton *copyButton, T1ProfileHeaderView *h
 
     BOOL shouldHideBlueReply = NO;
     @try {
-        shouldHideBlueReply = BHT_shouldHideBlueVerifiedReply(tweet, indexPath, (UIViewController *)self);
+        shouldHideBlueReply = BHT_shouldHideBlueVerifiedReply(tweet, indexPath);
     } @catch (NSException *e) {
         NSLog(@"[BHTwitter] hideBlueReplies caught at heightForRow: %@", e);
         shouldHideBlueReply = NO;
@@ -5143,6 +5152,7 @@ static NSBundle *BHBundle() {
 
 %end
 
+/*
 %hook TFNTableView
 
 - (void)layoutSubviews {
@@ -5206,3 +5216,4 @@ static NSBundle *BHBundle() {
 }
 
 %end
+*/
