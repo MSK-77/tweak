@@ -5068,6 +5068,8 @@ static NSBundle *BHBundle() {
         }
     }
 
+%end
+
 %hook TFNTableView
 
 - (void)layoutSubviews {
