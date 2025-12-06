@@ -402,9 +402,13 @@ PSSpecifier *photosVideosSection = [self newSectionWithTitle:[[BHTBundle sharedB
 
         PSSpecifier *hideWhoToFollow = [self newSwitchCellWithTitle:[[BHTBundle sharedBundle] localizedStringForKey:@"HIDE_WHO_FOLLOW_OPTION"] detailTitle:[[BHTBundle sharedBundle] localizedStringForKey:@"HIDE_WHO_FOLLOW_OPTION_DETAIL_TITLE"] key:@"hide_who_to_follow" defaultValue:false changeAction:nil];
 
+        PSSpecifier *alwaysFollowingPage = [self newSwitchCellWithTitle:[[BHTBundle sharedBundle] localizedStringForKey:@"ALWAYS_FOLLOWING_PAGE_OPTION_TITLE"] detailTitle:[[BHTBundle sharedBundle] localizedStringForKey:@"ALWAYS_FOLLOWING_PAGE_OPTION_DETAIL_TITLE"] key:@"always_following_page" defaultValue:false changeAction:nil];
+
         PSSpecifier *hidePremiumOffer = [self newSwitchCellWithTitle:[[BHTBundle sharedBundle] localizedStringForKey:@"HIDE_PREMIUM_OFFER_OPTION"] detailTitle:[[BHTBundle sharedBundle] localizedStringForKey:@"HIDE_PREMIUM_OFFER_OPTION_DETAIL_TITLE"] key:@"hide_premium_offer" defaultValue:false changeAction:nil];
 
         PSSpecifier *hideTrendVideos = [self newSwitchCellWithTitle:[[BHTBundle sharedBundle] localizedStringForKey:@"HIDE_TREND_VIDEOS_OPTION_TITLE"] detailTitle:[[BHTBundle sharedBundle] localizedStringForKey:@"HIDE_TREND_VIDEOS_OPTION_DETAIL_TITLE"] key:@"hide_trend_videos" defaultValue:false changeAction:nil];
+
+        PSSpecifier *hideSearchTrends = [self newSwitchCellWithTitle:[[BHTBundle sharedBundle] localizedStringForKey:@"HIDE_SEARCH_TRENDS_TITLE"] detailTitle:[[BHTBundle sharedBundle] localizedStringForKey:@"HIDE_SEARCH_TRENDS_DETAIL_TITLE"] key:@"hide_search_trends" defaultValue:false changeAction:nil];
 
         PSSpecifier *restoreReplyContext = [self newSwitchCellWithTitle:[[BHTBundle sharedBundle] localizedStringForKey:@"RESTORE_REPLY_CONTEXT_TITLE"] detailTitle:[[BHTBundle sharedBundle] localizedStringForKey:@"RESTORE_REPLY_CONTEXT_DETAIL_TITLE"] key:@"restore_reply_context" defaultValue:false changeAction:nil];
 
@@ -543,6 +547,8 @@ PSSpecifier *photosVideosSection = [self newSectionWithTitle:[[BHTBundle sharedB
                                                        defaultValue:false
                                                        changeAction:nil];
 
+        PSSpecifier *hideBlueReplies = [self newSwitchCellWithTitle:[[BHTBundle sharedBundle] localizedStringForKey:@"HIDE_BLUE_REPLIES_TITLE"] detailTitle:[[BHTBundle sharedBundle] localizedStringForKey:@"HIDE_BLUE_REPLIES_DETAIL_TITLE"] key:@"hide_blue_replies" defaultValue:false changeAction:nil];
+
         PSSpecifier *restoreVideoTimestamp = [self newSwitchCellWithTitle:[[BHTBundle sharedBundle] localizedStringForKey:@"RESTORE_VIDEO_TIMESTAMP_TITLE"] detailTitle:[[BHTBundle sharedBundle] localizedStringForKey:@"RESTORE_VIDEO_TIMESTAMP_DETAIL_TITLE"] key:@"restore_video_timestamp" defaultValue:false changeAction:nil];
 
 
@@ -583,6 +589,7 @@ PSSpecifier *photosVideosSection = [self newSectionWithTitle:[[BHTBundle sharedB
             hideTopics,
             hideTopicsToFollow,
             hideWhoToFollow,
+            alwaysFollowingPage,
             padLock,
             alwaysOpenSafari,
             stripTrackingParams,
@@ -605,6 +612,7 @@ PSSpecifier *photosVideosSection = [self newSectionWithTitle:[[BHTBundle sharedB
             hideGrokAnalyze,
             squareAvatars,
             replySorting,
+            hideBlueReplies,
             restoreReplyContext,
 
             profilesSection, // 2
@@ -620,6 +628,7 @@ PSSpecifier *photosVideosSection = [self newSectionWithTitle:[[BHTBundle sharedB
             searchSection, // 3
             noHistory,
             hideTrendVideos,
+            hideSearchTrends,
 
             messagesSection, // 4
             dmAvatars,

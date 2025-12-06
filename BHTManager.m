@@ -245,6 +245,9 @@
 + (BOOL)alwaysFollowingPage {
     return [[NSUserDefaults standardUserDefaults] boolForKey:@"always_following_page"];
 }
++ (BOOL)hideSearchTrends {
+    return [[NSUserDefaults standardUserDefaults] boolForKey:@"hide_search_trends"];
+}
 + (BOOL)stopHidingTabBar {
     return [[NSUserDefaults standardUserDefaults] boolForKey:@"no_tab_bar_hiding"];
 }
@@ -314,6 +317,9 @@
 
 + (BOOL)restoreTabLabels {
     return [[NSUserDefaults standardUserDefaults] boolForKey:@"restore_tab_labels"];
+}
++ (BOOL)hideBlueReplies {
+    return [[NSUserDefaults standardUserDefaults] boolForKey:@"hide_blue_replies"];
 }
 
 + (void)clearSourceLabelCache {

@@ -37,6 +37,7 @@ static void BHT_forceRefreshAllWindowAppearances(void);
 static void BHT_ensureThemingEngineSynchronized(BOOL forceSynchronize);
 static UIViewController* getViewControllerForView(UIView *view);
 static char kBHTSourceTapAddedKey;
+static BOOL BHT_isInConversationContainerHierarchy(UIViewController *viewController);
 
 // Theme state tracking
 static BOOL BHT_themeManagerInitialized = NO;
@@ -49,6 +50,9 @@ static NSMapTable<T1ImmersiveFullScreenViewController *, UILabel *> *playerToTim
 static NSMapTable<T1ImmersiveFullScreenViewController *, NSNumber *> *labelSearchCache = nil;
 static NSTimeInterval lastCacheInvalidation = 0;
 static const NSTimeInterval CACHE_INVALIDATION_INTERVAL = 10.0; // 10 seconds
+
+// Track conversation authors to avoid hiding their own replies
+static NSMapTable<id, NSString *> *BHTConversationAuthorIDs;
 
 // Static helper function for recursive view traversal - OPTIMIZED VERSION
 static void BH_EnumerateSubviewsRecursively(UIView *view, void (^block)(UIView *currentView)) {
@@ -68,6 +72,268 @@ static void BH_EnumerateSubviewsRecursively(UIView *view, void (^block)(UIView *
         BH_EnumerateSubviewsRecursively(subview, block);
     }
     recursionDepth--;
+}
+
+static BOOL BHT_textMatchesForYou(NSString *text) {
+    if (!text || ![text isKindOfClass:[NSString class]]) return NO;
+    NSString *trimmed = [[text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+    if (trimmed.length == 0) return NO;
+    return [trimmed containsString:@"for you"] || [trimmed isEqualToString:@"foryou"] || [text containsString:@"おすすめ"];
+}
+
+static BOOL BHT_textMatchesFollowing(NSString *text) {
+    if (!text || ![text isKindOfClass:[NSString class]]) return NO;
+    NSString *trimmed = [[text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+    if (trimmed.length == 0) return NO;
+    return [trimmed containsString:@"following"] || [text containsString:@"フォロー"];
+}
+
+static UISegmentedControl *BHT_findHomeSegmentControl(UIView *rootView) {
+    __block UISegmentedControl *foundControl = nil;
+    BH_EnumerateSubviewsRecursively(rootView, ^(UIView *currentView) {
+        if (foundControl) return;
+        if ([currentView isKindOfClass:[UISegmentedControl class]]) {
+            UISegmentedControl *segmentedControl = (UISegmentedControl *)currentView;
+            BOOL matchesHomeSegments = NO;
+            for (NSInteger idx = 0; idx < segmentedControl.numberOfSegments; idx++) {
+                NSString *title = [segmentedControl titleForSegmentAtIndex:idx];
+                if (BHT_textMatchesForYou(title) || BHT_textMatchesFollowing(title)) {
+                    matchesHomeSegments = YES;
+                    break;
+                }
+            }
+            if (matchesHomeSegments) {
+                foundControl = segmentedControl;
+            }
+        }
+    });
+    return foundControl;
+}
+
+static void BHT_applyFollowingTabPreference(UIView *rootView) {
+    if (![BHTManager alwaysFollowingPage]) {
+        return;
+    }
+
+    UISegmentedControl *segmentedControl = BHT_findHomeSegmentControl(rootView);
+    if (!segmentedControl) {
+        return;
+    }
+
+    NSInteger forYouIndex = NSNotFound;
+    NSInteger followingIndex = NSNotFound;
+    for (NSInteger idx = 0; idx < segmentedControl.numberOfSegments; idx++) {
+        NSString *title = [segmentedControl titleForSegmentAtIndex:idx];
+        if (BHT_textMatchesForYou(title)) {
+            forYouIndex = idx;
+        } else if (BHT_textMatchesFollowing(title)) {
+            followingIndex = idx;
+        }
+    }
+
+    NSInteger previousSelection = segmentedControl.selectedSegmentIndex;
+
+    if (forYouIndex != NSNotFound) {
+        [segmentedControl removeSegmentAtIndex:forYouIndex animated:NO];
+        if (followingIndex > forYouIndex && followingIndex != NSNotFound) {
+            followingIndex -= 1;
+        }
+    }
+
+    NSInteger targetIndex = followingIndex != NSNotFound ? followingIndex : 0;
+    if (targetIndex >= 0 && targetIndex < segmentedControl.numberOfSegments) {
+        segmentedControl.selectedSegmentIndex = targetIndex;
+        if (previousSelection != targetIndex) {
+            [segmentedControl sendActionsForControlEvents:UIControlEventValueChanged];
+        }
+    }
+}
+
+static id BHT_safeValueForKey(id object, NSString *key) {
+    @try {
+        return [object valueForKey:key];
+    } @catch (NSException *exception) {
+        return nil;
+    }
+}
+
+static BOOL BHT_boolFromObject(id value) {
+    if ([value respondsToSelector:@selector(boolValue)]) {
+        return [value boolValue];
+    }
+    return NO;
+}
+
+static NSString *BHT_stringFromIdentifier(id value) {
+    if ([value isKindOfClass:[NSString class]]) {
+        return value;
+    }
+    if ([value respondsToSelector:@selector(stringValue)]) {
+        return [value stringValue];
+    }
+    return nil;
+}
+
+static NSString *BHT_userIdentifierFromObject(id object) {
+    if (!object) return nil;
+    NSArray<NSString *> *keys = @[ @"userID", @"userId", @"user_id", @"rest_id", @"restId", @"id_str", @"idStr", @"id" ];
+    for (NSString *key in keys) {
+        id value = BHT_safeValueForKey(object, key);
+        NSString *stringValue = BHT_stringFromIdentifier(value);
+        if (stringValue.length > 0) {
+            return stringValue;
+        }
+    }
+    return nil;
+}
+
+static id BHT_userFromStatus(id status) {
+    id user = BHT_safeValueForKey(status, @"user");
+    if (!user) user = BHT_safeValueForKey(status, @"coreUser");
+    if (!user) user = BHT_safeValueForKey(status, @"author");
+    return user;
+}
+
+static BOOL BHT_userIsBlueVerified(id object) {
+    if (!object) return NO;
+    NSArray<NSString *> *keys = @[ @"blueVerified", @"is_blue_verified" ];
+    for (NSString *key in keys) {
+        id value = BHT_safeValueForKey(object, key);
+        if (value) {
+            return BHT_boolFromObject(value);
+        }
+    }
+
+    SEL selectors[] = { @selector(isBlueVerified), @selector(isFromUserBlueVerified) };
+    for (NSUInteger idx = 0; idx < sizeof(selectors) / sizeof(SEL); idx++) {
+        SEL selector = selectors[idx];
+        if ([object respondsToSelector:selector]) {
+            return ((BOOL (*)(id, SEL))objc_msgSend)(object, selector);
+        }
+    }
+    return NO;
+}
+
+static BOOL BHT_userIsFollowed(id object, BOOL *hasValue) {
+    if (hasValue) *hasValue = NO;
+    if (!object) return NO;
+
+    SEL selectors[] = { @selector(isFollowing), @selector(following) };
+    for (NSUInteger idx = 0; idx < sizeof(selectors) / sizeof(SEL); idx++) {
+        SEL selector = selectors[idx];
+        if ([object respondsToSelector:selector]) {
+            if (hasValue) *hasValue = YES;
+            return ((BOOL (*)(id, SEL))objc_msgSend)(object, selector);
+        }
+    }
+
+    NSArray<NSString *> *keys = @[ @"following", @"is_following" ];
+    for (NSString *key in keys) {
+        id value = BHT_safeValueForKey(object, key);
+        if (value) {
+            if (hasValue) *hasValue = YES;
+            return BHT_boolFromObject(value);
+        }
+    }
+
+    id friendship = BHT_safeValueForKey(object, @"friendship");
+    if (friendship) {
+        return BHT_userIsFollowed(friendship, hasValue);
+    }
+
+    return NO;
+}
+
+static NSString *BHT_conversationAuthorForController(id controller) {
+    if (!BHTConversationAuthorIDs) {
+        BHTConversationAuthorIDs = [NSMapTable weakToStrongObjectsMapTable];
+    }
+    return [BHTConversationAuthorIDs objectForKey:controller];
+}
+
+static void BHT_storeConversationAuthorForController(id controller, NSString *authorID) {
+    if (!controller || authorID.length == 0) return;
+    if (!BHTConversationAuthorIDs) {
+        BHTConversationAuthorIDs = [NSMapTable weakToStrongObjectsMapTable];
+    }
+    [BHTConversationAuthorIDs setObject:authorID forKey:controller];
+}
+
+static BOOL BHT_isSearchTabController(UIViewController *controller) {
+    UIViewController *current = controller;
+    while (current) {
+        NSString *className = NSStringFromClass([current class]);
+        if ([className containsString:@"Search"] || [className containsString:@"Explore"]) {
+            return YES;
+        }
+        UIViewController *next = current.parentViewController ?: current.navigationController ?: current.presentingViewController;
+        if (next == current) break;
+        current = next;
+    }
+    return NO;
+}
+
+static BOOL BHT_shouldHideSearchTabItem(id item, NSString *className) {
+    if ([item isKindOfClass:%c(T1URTTimelineStatusItemViewModel)]) {
+        return NO;
+    }
+    NSString *lowercaseName = [className lowercaseString];
+    if ([lowercaseName containsString:@"trend"] || [lowercaseName containsString:@"carousel"] || [lowercaseName containsString:@"moduleheader"] || [lowercaseName containsString:@"modulefooter"] || [lowercaseName containsString:@"topic"] || [lowercaseName containsString:@"eventsummary"] || [lowercaseName containsString:@"messageitem"]) {
+        return YES;
+    }
+    if ([item isKindOfClass:%c(_TtC10TwitterURT26URTTimelinePromptViewModel)]) {
+        return YES;
+    }
+    return NO;
+}
+
+static BOOL BHT_shouldHideBlueVerifiedReply(UIViewController *controller, id item, NSIndexPath *indexPath) {
+    if (![BHTManager hideBlueReplies]) {
+        return NO;
+    }
+
+    if (!BHT_isInConversationContainerHierarchy(controller)) {
+        return NO;
+    }
+
+    if (![item isKindOfClass:%c(T1URTTimelineStatusItemViewModel)]) {
+        return NO;
+    }
+
+    id status = BHT_safeValueForKey(item, @"status") ?: BHT_safeValueForKey(item, @"tweet") ?: item;
+    id user = BHT_userFromStatus(status);
+    NSString *userID = BHT_userIdentifierFromObject(user ?: status);
+
+    if (indexPath && indexPath.row == 0 && userID.length > 0) {
+        BHT_storeConversationAuthorForController(controller, userID);
+        return NO;
+    }
+
+    NSString *authorID = BHT_conversationAuthorForController(controller);
+    if (!authorID && userID.length > 0) {
+        BHT_storeConversationAuthorForController(controller, userID);
+        authorID = userID;
+    }
+
+    if (authorID && userID && [authorID isEqualToString:userID]) {
+        return NO;
+    }
+
+    if (!BHT_userIsBlueVerified(user ?: status)) {
+        return NO;
+    }
+
+    BOOL hasFollowInfo = NO;
+    BOOL isFollowed = BHT_userIsFollowed(user ?: status, &hasFollowInfo);
+    if (!hasFollowInfo) {
+        return NO;
+    }
+
+    if (isFollowed) {
+        return NO;
+    }
+
+    return YES;
 }
 
 // MARK: imports to hook into Twitters TAE color system
@@ -1064,8 +1330,15 @@ static void BHTApplyCopyButtonStyle(UIButton *copyButton, T1ProfileHeaderView *h
     UITableViewCell *_orig = %orig;
     id tweet = [self itemAtIndexPath:arg2];
     NSString *class_name = NSStringFromClass([tweet classForCoder]);
+    NSIndexPath *indexPath = [arg2 isKindOfClass:[NSIndexPath class]] ? arg2 : nil;
 
+    BOOL isSearchContext = [BHTManager hideSearchTrends] && BHT_isSearchTabController((UIViewController *)self);
+    BOOL shouldHideSearchItem = isSearchContext && BHT_shouldHideSearchTabItem(tweet, class_name);
+    BOOL shouldHideBlueReply = BHT_shouldHideBlueVerifiedReply((UIViewController *)self, tweet, indexPath);
 
+    if (shouldHideSearchItem || shouldHideBlueReply) {
+        [_orig setHidden:true];
+    }
 
     if ([BHTManager HidePromoted] && [tweet respondsToSelector:@selector(isPromoted)] && [tweet performSelector:@selector(isPromoted)]) {
         [_orig setHidden:YES];
@@ -1141,6 +1414,15 @@ static void BHTApplyCopyButtonStyle(UIButton *copyButton, T1ProfileHeaderView *h
 - (double)tableView:(id)arg1 heightForRowAtIndexPath:(id)arg2 {
     id tweet = [self itemAtIndexPath:arg2];
     NSString *class_name = NSStringFromClass([tweet classForCoder]);
+    NSIndexPath *indexPath = [arg2 isKindOfClass:[NSIndexPath class]] ? arg2 : nil;
+
+    BOOL isSearchContext = [BHTManager hideSearchTrends] && BHT_isSearchTabController((UIViewController *)self);
+    BOOL shouldHideSearchItem = isSearchContext && BHT_shouldHideSearchTabItem(tweet, class_name);
+    BOOL shouldHideBlueReply = BHT_shouldHideBlueVerifiedReply((UIViewController *)self, tweet, indexPath);
+
+    if (shouldHideSearchItem || shouldHideBlueReply) {
+        return 0;
+    }
 
     if ([BHTManager HidePromoted] && [tweet respondsToSelector:@selector(isPromoted)] && [tweet performSelector:@selector(isPromoted)]) {
         return 0;
@@ -1229,6 +1511,19 @@ static void BHTApplyCopyButtonStyle(UIButton *copyButton, T1ProfileHeaderView *h
 %hook TFNTwitterStatus
 - (_Bool)isCardHidden {
     return ([BHTManager HidePromoted] && [self isPromoted]) ? true : %orig;
+}
+%end
+
+// MARK: Force Following tab
+%hook TFSTimelineViewController
+- (void)viewDidAppear:(BOOL)animated {
+    %orig(animated);
+    BHT_applyFollowingTabPreference(self.view);
+}
+
+- (void)viewDidLayoutSubviews {
+    %orig;
+    BHT_applyFollowingTabPreference(self.view);
 }
 %end
 

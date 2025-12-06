@@ -53,6 +53,7 @@
 + (BOOL)forceTweetFullFrame;
 + (BOOL)stripTrackingParams;
 + (BOOL)alwaysFollowingPage;
++ (BOOL)hideSearchTrends;
 + (BOOL)stopHidingTabBar;
 + (BOOL)changeBackground;
 + (bool)backgroundImage;
@@ -72,6 +73,7 @@
 + (BOOL)classicTabBarEnabled;
 + (BOOL)restoreTabLabels;
 + (BOOL)noTabBarHiding;
++ (BOOL)hideBlueReplies;
 
 // Translate functionality
 + (BOOL)enableTranslate;

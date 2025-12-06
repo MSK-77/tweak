@@ -27,6 +27,10 @@
 - (instancetype)initWithAccount:(TFNTwitterAccount *)account;
 @end
 
+@interface SearchSettingsViewController : UIViewController
+- (instancetype)initWithAccount:(TFNTwitterAccount *)account;
+@end
+
 @interface TweetsSettingsViewController : UIViewController
 - (instancetype)initWithAccount:(TFNTwitterAccount *)account;
 @end
@@ -1114,9 +1118,7 @@ static UIFont *TwitterChirpFont(TwitterFontStyle style) {
 }
 
 - (void)showSearchSettings {
-    ModernSettingsPlaceholderViewController *vc =
-        [[ModernSettingsPlaceholderViewController alloc] initWithAccount:self.account
-                                                                titleKey:@"MODERN_SETTINGS_SEARCH_TITLE"];
+    SearchSettingsViewController *vc = [[SearchSettingsViewController alloc] initWithAccount:self.account];
     [self.navigationController pushViewController:vc animated:YES];
 }
 
@@ -1566,6 +1568,123 @@ static UIFont *TwitterChirpFont(TwitterFontStyle style) {
 @end
 
 // ==============================
+// SearchSettingsViewController
+// ==============================
+@interface SearchSettingsViewController () <UITableViewDataSource, UITableViewDelegate>
+@property (nonatomic, strong) TFNTwitterAccount *account;
+@property (nonatomic, strong) UITableView *tableView;
+@property (nonatomic, strong) NSArray<NSDictionary *> *settings;
+@end
+
+@implementation SearchSettingsViewController
+
+- (instancetype)initWithAccount:(TFNTwitterAccount *)account {
+    if ((self = [super init])) {
+        self.account = account;
+        [self buildSettingsList];
+    }
+    return self;
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    [self setupNav];
+    [self setupTable];
+}
+
+- (void)setupNav {
+    NSString *title = [[BHTBundle sharedBundle] localizedStringForKey:@"MODERN_SETTINGS_SEARCH_TITLE"];
+    if (self.account) {
+        self.navigationItem.titleView = [objc_getClass("TFNTitleView") titleViewWithTitle:title subtitle:self.account.displayUsername];
+    } else {
+        self.title = title;
+    }
+}
+
+- (void)setupTable {
+    self.view.backgroundColor = [BHDimPalette currentBackgroundColor];
+    self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleGrouped];
+    self.tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.tableView.dataSource = self;
+    self.tableView.delegate = self;
+    self.tableView.backgroundColor = [BHDimPalette currentBackgroundColor];
+    self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.showsVerticalScrollIndicator = NO;
+    self.tableView.showsHorizontalScrollIndicator = NO;
+    self.tableView.estimatedRowHeight = 80;
+    [self.tableView registerClass:[ModernSettingsToggleCell class] forCellReuseIdentifier:@"ToggleCell"];
+    [self.view addSubview:self.tableView];
+}
+
+- (void)buildSettingsList {
+    self.settings = @[
+        @{ @"key": @"no_his", @"titleKey": @"NO_HISTORY_OPTION_TITLE", @"subtitleKey": @"NO_HISTORY_OPTION_DETAIL_TITLE", @"default": @NO, @"type": @"toggle" },
+        @{ @"key": @"hide_trend_videos", @"titleKey": @"HIDE_TREND_VIDEOS_OPTION_TITLE", @"subtitleKey": @"HIDE_TREND_VIDEOS_OPTION_DETAIL_TITLE", @"default": @NO, @"type": @"toggle" },
+        @{ @"key": @"hide_search_trends", @"titleKey": @"HIDE_SEARCH_TRENDS_TITLE", @"subtitleKey": @"HIDE_SEARCH_TRENDS_DETAIL_TITLE", @"default": @NO, @"type": @"toggle" }
+    ];
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    return self.settings.count;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    NSDictionary *settingData = self.settings[indexPath.row];
+    ModernSettingsToggleCell *cell = [tableView dequeueReusableCellWithIdentifier:@"ToggleCell" forIndexPath:indexPath];
+    NSString *title = [[BHTBundle sharedBundle] localizedStringForKey:settingData[@"titleKey"]];
+    NSString *subtitleKey = settingData[@"subtitleKey"];
+    NSString *subtitle = (subtitleKey.length > 0) ? [[BHTBundle sharedBundle] localizedStringForKey:subtitleKey] : @"";
+    [cell configureWithTitle:title subtitle:subtitle];
+    NSString *key = settingData[@"key"];
+    BOOL isEnabled = [[[NSUserDefaults standardUserDefaults] objectForKey:key] ?: settingData[@"default"] boolValue];
+    cell.toggleSwitch.on = isEnabled;
+    objc_setAssociatedObject(cell.toggleSwitch, @"prefKey", key, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [cell addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+}
+
+- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
+    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableView.frame.size.width, 0)];
+    UILabel *label = [[UILabel alloc] init];
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    label.text = [[BHTBundle sharedBundle] localizedStringForKey:@"MODERN_SETTINGS_SEARCH_SUBTITLE"];
+    label.numberOfLines = 0;
+    id fontGroup = [objc_getClass("TAEStandardFontGroup") sharedFontGroup];
+    label.font = [fontGroup performSelector:@selector(subtext2Font)];
+    Class TAEColorSettingsCls = objc_getClass("TAEColorSettings");
+    id settings = [TAEColorSettingsCls sharedSettings];
+    id colorPalette = [[settings currentColorPalette] colorPalette];
+    UIColor *subtitleColor = [colorPalette performSelector:@selector(tabBarItemColor)];
+    label.textColor = subtitleColor;
+    [header addSubview:label];
+    [NSLayoutConstraint activateConstraints:@[
+        [label.leadingAnchor constraintEqualToAnchor:header.leadingAnchor constant:20],
+        [label.trailingAnchor constraintEqualToAnchor:header.trailingAnchor constant:-20],
+        [label.topAnchor constraintEqualToAnchor:header.topAnchor constant:8],
+        [label.bottomAnchor constraintEqualToAnchor:header.bottomAnchor constant:-8]
+    ]];
+    return header;
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
+    return UITableViewAutomaticDimension;
+}
+
+- (void)switchChanged:(UISwitch *)sender {
+    NSString *key = objc_getAssociatedObject(sender, @"prefKey");
+    if (key) {
+        [[NSUserDefaults standardUserDefaults] setBool:sender.isOn forKey:key];
+    }
+}
+
+@end
+
+// ==============================
 // TweetsSettingsViewController (cleaned - old_style removed)
 // ==============================
 @interface TweetsSettingsViewController () <UITableViewDataSource, UITableViewDelegate>
@@ -1626,6 +1745,7 @@ static UIFont *TwitterChirpFont(TwitterFontStyle style) {
         @{ @"key": @"disableSensitiveTweetWarnings", @"titleKey": @"DISABLE_SENSITIVE_TWEET_WARNINGS_OPTION_TITLE", @"subtitleKey": @"", @"default": @YES, @"type": @"toggle" },
         @{ @"key": @"hide_grok_analyze", @"titleKey": @"HIDE_GROK_ANALYZE_BUTTON_TITLE", @"subtitleKey": @"HIDE_GROK_ANALYZE_BUTTON_DETAIL_TITLE", @"default": @YES, @"type": @"toggle" },
         @{ @"key": @"reply_sorting_enabled", @"titleKey": @"REPLY_SORTING_TITLE", @"subtitleKey": @"REPLY_SORTING_DETAIL_TITLE", @"default": @NO, @"type": @"toggle" },
+        @{ @"key": @"hide_blue_replies", @"titleKey": @"HIDE_BLUE_REPLIES_TITLE", @"subtitleKey": @"HIDE_BLUE_REPLIES_DETAIL_TITLE", @"default": @NO, @"type": @"toggle" },
         @{ @"key": @"restore_reply_context", @"titleKey": @"RESTORE_REPLY_CONTEXT_TITLE", @"subtitleKey": @"RESTORE_REPLY_CONTEXT_DETAIL_TITLE", @"default": @YES, @"type": @"toggle" }
     ];
 }
@@ -2921,8 +3041,7 @@ if ([type isEqualToString:@"compactButton"]) {
         @{ @"key": @"hide_topics", @"titleKey": @"HIDE_TOPICS_OPTION_TITLE", @"subtitleKey": @"HIDE_TOPICS_OPTION_DETAIL_TITLE", @"default": @YES },
         @{ @"key": @"hide_topics_to_follow", @"titleKey": @"HIDE_TOPICS_TO_FOLLOW_OPTION", @"subtitleKey": @"HIDE_TOPICS_TO_FOLLOW_OPTION_DETAIL_TITLE", @"default": @YES },
         @{ @"key": @"hide_who_to_follow", @"titleKey": @"HIDE_WHO_FOLLOW_OPTION", @"subtitleKey": @"HIDE_WHO_FOLLOW_OPTION_DETAIL_TITLE", @"default": @YES },
-        @{ @"key": @"no_his", @"titleKey": @"NO_HISTORY_OPTION_TITLE", @"subtitleKey": @"NO_HISTORY_OPTION_DETAIL_TITLE", @"default": @NO },
-        @{ @"key": @"hide_trend_videos", @"titleKey": @"HIDE_TREND_VIDEOS_OPTION_TITLE", @"subtitleKey": @"HIDE_TREND_VIDEOS_OPTION_DETAIL_TITLE", @"default": @NO },
+        @{ @"key": @"always_following_page", @"titleKey": @"ALWAYS_FOLLOWING_PAGE_OPTION_TITLE", @"subtitleKey": @"ALWAYS_FOLLOWING_PAGE_OPTION_DETAIL_TITLE", @"default": @NO },
         @{ @"key": @"hide_spaces", @"titleKey": @"HIDE_SPACE_OPTION_TITLE", @"subtitleKey": @"", @"default": @NO },
         @{ @"key": @"no_tab_bar_hiding", @"titleKey": @"STOP_HIDING_TAB_BAR_TITLE", @"subtitleKey": @"STOP_HIDING_TAB_BAR_DETAIL_TITLE", @"default": @YES },
         @{ @"key": @"tab_bar_theming", @"titleKey": @"CLASSIC_TAB_BAR_SETTINGS_TITLE", @"subtitleKey": @"CLASSIC_TAB_BAR_SETTINGS_DETAIL", @"default": @NO },

@@ -141,6 +141,9 @@
 "RESTORE_REPLY_CONTEXT_TITLE" = "Restore reply context";
 "RESTORE_REPLY_CONTEXT_DETAIL_TITLE" = "Shows the people that are being replied to under Tweets.";
 
+"HIDE_BLUE_REPLIES_TITLE" = "Hide blue badge replies";
+"HIDE_BLUE_REPLIES_DETAIL_TITLE" = "Hide replies from blue badge accounts you don't follow (except the author).";
+
 "ENABLE_TRANSLATE_OPTION_TITLE" = "AI translate button (beta)";
 "ENABLE_TRANSLATE_OPTION_DETAIL_TITLE" = "Adds an AI translate button to Tweets that are not in your language. Requires an API key.";
 
@@ -185,6 +188,9 @@
 
 "HIDE_TREND_VIDEOS_OPTION_TITLE" = "No trending videos";
 "HIDE_TREND_VIDEOS_OPTION_DETAIL_TITLE" = "Remove the trending videos from the search menu.";
+
+"HIDE_SEARCH_TRENDS_TITLE" = "Hide search trends";
+"HIDE_SEARCH_TRENDS_DETAIL_TITLE" = "Remove the For you and trending modules from the Search tab.";
 
 
 /*Messages*/
