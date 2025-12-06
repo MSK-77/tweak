@@ -110,14 +110,31 @@ static UISegmentedControl *BHT_findHomeSegmentControl(UIView *rootView) {
     return foundControl;
 }
 
-static void BHT_applyFollowingTabPreference(UIView *rootView) {
+static UISegmentedControl *BHT_findHomeSegmentControlInWindows(void) {
+    UISegmentedControl *found = nil;
+    for (UIWindow *window in UIApplication.sharedApplication.windows) {
+        if (window.hidden) continue;
+        UISegmentedControl *candidate = BHT_findHomeSegmentControl(window);
+        if (candidate) {
+            found = candidate;
+            break;
+        }
+    }
+    return found;
+}
+
+static void BHT_applyFollowingTabPreferenceForController(UIViewController *controller) {
     if (![BHTManager alwaysFollowingPage]) {
         return;
     }
 
-    UISegmentedControl *segmentedControl = BHT_findHomeSegmentControl(rootView);
+    UISegmentedControl *segmentedControl = nil;
+    if (controller.view) {
+        segmentedControl = BHT_findHomeSegmentControl(controller.view);
+    }
     if (!segmentedControl) {
-        return;
+        segmentedControl = BHT_findHomeSegmentControlInWindows();
+        if (!segmentedControl) return;
     }
 
     NSInteger forYouIndex = NSNotFound;
@@ -297,55 +314,60 @@ static BOOL BHT_shouldHideSearchTabItem(id item, NSString *className) {
 }
 
 static BOOL BHT_shouldHideBlueVerifiedReply(UIViewController *controller, id item, NSIndexPath *indexPath) {
-    if (![BHTManager hideBlueReplies]) {
+    @try {
+        if (![BHTManager hideBlueReplies]) {
+            return NO;
+        }
+
+        if (!BHT_isInConversationContainerHierarchy(controller)) {
+            return NO;
+        }
+
+        if (![item isKindOfClass:%c(T1URTTimelineStatusItemViewModel)]) {
+            return NO;
+        }
+
+        id status = BHT_safeValueForKey(item, @"status") ?: BHT_safeValueForKey(item, @"tweet") ?: item;
+        if (!status) {
+            return NO;
+        }
+        id user = BHT_userFromStatus(status);
+        NSString *userID = BHT_userIdentifierFromObject(user ?: status);
+
+        if (indexPath && indexPath.row == 0 && userID.length > 0) {
+            BHT_storeConversationAuthorForController(controller, userID);
+            return NO;
+        }
+
+        NSString *authorID = BHT_conversationAuthorForController(controller);
+        if (!authorID && userID.length > 0) {
+            BHT_storeConversationAuthorForController(controller, userID);
+            authorID = userID;
+        }
+
+        if (authorID && userID && [authorID isEqualToString:userID]) {
+            return NO;
+        }
+
+        if (!BHT_userIsBlueVerified(user ?: status)) {
+            return NO;
+        }
+
+        BOOL hasFollowInfo = NO;
+        BOOL isFollowed = BHT_userIsFollowed(user ?: status, &hasFollowInfo);
+        if (!hasFollowInfo) {
+            return NO;
+        }
+
+        if (isFollowed) {
+            return NO;
+        }
+
+        return YES;
+    } @catch (NSException *exception) {
+        NSLog(@"[BHTwitter] hideBlueReplies exception: %@", exception);
         return NO;
     }
-
-    if (!BHT_isInConversationContainerHierarchy(controller)) {
-        return NO;
-    }
-
-    if (![item isKindOfClass:%c(T1URTTimelineStatusItemViewModel)]) {
-        return NO;
-    }
-
-    id status = BHT_safeValueForKey(item, @"status") ?: BHT_safeValueForKey(item, @"tweet") ?: item;
-    if (!status) {
-        return NO;
-    }
-    id user = BHT_userFromStatus(status);
-    NSString *userID = BHT_userIdentifierFromObject(user ?: status);
-
-    if (indexPath && indexPath.row == 0 && userID.length > 0) {
-        BHT_storeConversationAuthorForController(controller, userID);
-        return NO;
-    }
-
-    NSString *authorID = BHT_conversationAuthorForController(controller);
-    if (!authorID && userID.length > 0) {
-        BHT_storeConversationAuthorForController(controller, userID);
-        authorID = userID;
-    }
-
-    if (authorID && userID && [authorID isEqualToString:userID]) {
-        return NO;
-    }
-
-    if (!BHT_userIsBlueVerified(user ?: status)) {
-        return NO;
-    }
-
-    BOOL hasFollowInfo = NO;
-    BOOL isFollowed = BHT_userIsFollowed(user ?: status, &hasFollowInfo);
-    if (!hasFollowInfo) {
-        return NO;
-    }
-
-    if (isFollowed) {
-        return NO;
-    }
-
-    return YES;
 }
 
 // MARK: imports to hook into Twitters TAE color system
@@ -1536,12 +1558,12 @@ static void BHTApplyCopyButtonStyle(UIButton *copyButton, T1ProfileHeaderView *h
 %hook TFSTimelineViewController
 - (void)viewDidAppear:(BOOL)animated {
     %orig(animated);
-    BHT_applyFollowingTabPreference(self.view);
+    BHT_applyFollowingTabPreferenceForController(self);
 }
 
 - (void)viewDidLayoutSubviews {
     %orig;
-    BHT_applyFollowingTabPreference(self.view);
+    BHT_applyFollowingTabPreferenceForController(self);
 }
 %end
 
