@@ -316,85 +316,157 @@ static BOOL BHT_isLikelySearchContext(UIViewController *controller, NSString *lo
     return YES;
 }
 
-static BOOL BHT_shouldHideSearchTabItem(id item, NSString *className) {
-    if ([item isKindOfClass:%c(T1URTTimelineStatusItemViewModel)]) {
+// 検索タブ内の「トレンド / ニュース / おすすめモジュール」を隠すかどうか
+static BOOL BHT_shouldHideSearchTabItem(id itemViewModel, UIViewController *controller)
+{
+    if (![BHTManager hideSearchTrends]) {
         return NO;
     }
-    NSString *lowercaseName = [className lowercaseString];
-    if ([lowercaseName containsString:@"trend"] ||
-        [lowercaseName containsString:@"carousel"] ||
-        [lowercaseName containsString:@"moduleheader"] ||
-        [lowercaseName containsString:@"modulefooter"] ||
-        [lowercaseName containsString:@"topic"] ||
-        [lowercaseName containsString:@"eventsummary"] ||
-        [lowercaseName containsString:@"messageitem"]) {
-        return YES;
-    }
-    if ([item isKindOfClass:%c(_TtC10TwitterURT26URTTimelinePromptViewModel)]) {
-        return YES;
-    }
-    if ([lowercaseName containsString:@"query"] ||
-        [lowercaseName containsString:@"recent"] ||
-        [lowercaseName containsString:@"suggest"] ||
-        [lowercaseName containsString:@"history"]) {
+
+    // 検索画面っぽくないコンテキストなら何もしない
+    if (!BHT_isLikelySearchContext(controller)) {
         return NO;
     }
-    return NO;
+
+    if (!itemViewModel) {
+        return NO;
+    }
+
+    Class cls = [itemViewModel classForCoder];
+    NSString *className = NSStringFromClass(cls);
+    if (className.length == 0) {
+        return NO;
+    }
+
+    NSString *lower = className.lowercaseString;
+
+    // 1) 検索結果ツイートは常に表示
+    if ([itemViewModel isKindOfClass:%c(T1URTTimelineStatusItemViewModel)]) {
+        return NO;
+    }
+
+    // 2) 検索結果のユーザーなどを残す（UserItemViewModel 系）
+    if ([lower containsString:@"useritemviewmodel"] ||
+        [lower containsString:@"useritem"] ||
+        [lower containsString:@"profileitem"]) {
+        return NO;
+    }
+
+    // 3) 検索履歴・サジェスト・クエリ候補っぽいものは残す
+    if ([lower containsString:@"recent"]  ||
+        [lower containsString:@"history"] ||
+        [lower containsString:@"suggest"] ||
+        [lower containsString:@"query"]   ||
+        [lower containsString:@"typeahead"]) {
+        return NO;
+    }
+
+    // 4) 明らかに「トレンド / ニュース / おすすめモジュール」っぽいものは隠す
+    if ([lower containsString:@"trend"]      ||
+        [lower containsString:@"explore"]    ||
+        [lower containsString:@"discovery"]  ||
+        [lower containsString:@"news"]       ||
+        [lower containsString:@"topic"]      ||
+        [lower containsString:@"carousel"]   ||
+        [lower containsString:@"moduleheader"] ||
+        [lower containsString:@"modulefooter"] ||
+        [cls isEqual:%c(_TtC10TwitterURT26URTTimelinePromptViewModel)] ||
+        [cls isEqual:%c(TwitterURT_URTModuleHeaderViewModel)] ||
+        [cls isEqual:%c(TwitterURT_URTModuleFooterViewModel)]) {
+        return YES;
+    }
+
+    // 5) フォールバック:
+    //   ・検索タブ内の「ツイートでもユーザーでも履歴でもなさそうなモジュール」は非表示
+    return YES;
 }
 
 
-static BOOL BHT_shouldHideBlueVerifiedReply(UIViewController *controller, id item, NSIndexPath *indexPath) {
+
+// 会話ビューの青バッジ返信を隠すかどうか
+static BOOL BHT_shouldHideBlueVerifiedReply(id itemViewModel,
+                                            NSIndexPath *indexPath,
+                                            UIViewController *controller)
+{
+    // 設定 OFF なら何もしない
+    if (![BHTManager hideBlueReplies]) {
+        return NO;
+    }
+
+    // 会話ビュー以外では何もしない（誤爆防止）
+    if (!BHT_isInConversationContainerHierarchy(controller)) {
+        return NO;
+    }
+
+    if (!itemViewModel || !indexPath) {
+        return NO;
+    }
+
+    // 通常のタイムライン status のみ対象にする
+    if (![itemViewModel isKindOfClass:%c(T1URTTimelineStatusItemViewModel)]) {
+        return NO;
+    }
+
+    T1URTTimelineStatusItemViewModel *statusVM = itemViewModel;
+    id status = nil;
+
+    // クラッシュ防止で安全に取得
     @try {
-        if (![BHTManager hideBlueReplies]) {
-            return NO;
-        }
-
-        if (!BHT_isInConversationContainerHierarchy(controller)) {
-            return NO;
-        }
-
-        if (![item isKindOfClass:%c(T1URTTimelineStatusItemViewModel)]) {
-            return NO;
-        }
-
-        id status = BHT_safeValueForKey(item, @"status") ?: BHT_safeValueForKey(item, @"tweet") ?: item;
-        if (!status) {
-            return NO;
-        }
-        id user = BHT_userFromStatus(status);
-        NSString *userID = BHT_userIdentifierFromObject(user ?: status);
-
-        if (indexPath && indexPath.row == 0 && userID.length > 0) {
-            BHT_storeConversationAuthorForController(controller, userID);
-            return NO;
-        }
-
-        NSString *authorID = BHT_conversationAuthorForController(controller);
-        if (!authorID && userID.length > 0) {
-            BHT_storeConversationAuthorForController(controller, userID);
-            authorID = userID;
-        }
-
-        if (authorID && userID && [authorID isEqualToString:userID]) {
-            return NO;
-        }
-
-        if (!BHT_userIsBlueVerified(user ?: status)) {
-            return NO;
-        }
-
-        BOOL hasFollowInfo = NO;
-        BOOL isFollowed = BHT_userIsFollowed(user ?: status, &hasFollowInfo);
-        if (hasFollowInfo && isFollowed) {
-            return NO;
-        }
-
-        return YES;
-    } @catch (NSException *exception) {
-        NSLog(@"[BHTwitter] hideBlueReplies exception: %@", exception);
+        status = [statusVM valueForKey:@"status"];
+    } @catch (__unused NSException *e) { }
+    if (!status) {
         return NO;
     }
+
+    id user = BHT_userFromStatus(status);
+    if (!user) {
+        return NO;
+    }
+
+    // 著者の ID を NSMapTable に記録しておき、本人の返信は隠さない
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        BHTConversationAuthorIDs = [NSMapTable weakToStrongObjectsMapTable];
+    });
+
+    NSString *authorID = [BHTConversationAuthorIDs objectForKey:controller];
+    NSString *currentUserID = BHT_userIdentifierFromObject(user);
+
+    if (indexPath.row == 0 && currentUserID.length > 0) {
+        // 一番上のツイート（スレ主）を著者として記録
+        [BHTConversationAuthorIDs setObject:currentUserID forKey:controller];
+        authorID = currentUserID;
+    }
+
+    // 著者自身のツイートは絶対に隠さない
+    if (authorID.length > 0 && currentUserID.length > 0 &&
+        [authorID isEqualToString:currentUserID]) {
+        return NO;
+    }
+
+    // 青バッジでなければ対象外
+    if (!BHT_userIsBlueVerified(user)) {
+        return NO;
+    }
+
+    // フォロー状態を確認
+    BOOL hasFollowInfo = NO;
+    BOOL isFollowed = BHT_userIsFollowed(user, &hasFollowInfo);
+
+    // フォロー情報が取れない場合は安全側で「隠さない」
+    if (!hasFollowInfo) {
+        return NO;
+    }
+
+    // 自分がフォローしている青バッジは表示
+    if (isFollowed) {
+        return NO;
+    }
+
+    // ここまで来たら「青バッジ & フォローしていない」返信なので隠す
+    return YES;
 }
+
 
 // MARK: imports to hook into Twitters TAE color system
 
