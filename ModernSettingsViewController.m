@@ -2633,11 +2633,8 @@ if ([type isEqualToString:@"compactButton"]) {
         return;
     }
 
-    if (!@available(iOS 14.0, *)) {
-        return;
-    }
-
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    if (@available(iOS 14.0, *)) {
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     NSString *currentHost = [defaults objectForKey:@"tweet_url_host"] ?: @"x.com";
 
     NSArray<NSString *> *hosts = @[
@@ -2698,8 +2695,9 @@ if ([type isEqualToString:@"compactButton"]) {
                                  options:0
                                 children:actions];
 
-    menuButton.menu = menu;
-    menuButton.showsMenuAsPrimaryAction = YES;
+        menuButton.menu = menu;
+        menuButton.showsMenuAsPrimaryAction = YES;
+    }
 }
 
 - (void)showRestartRequiredAlert:(NSString *)messageKey {

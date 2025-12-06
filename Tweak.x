@@ -956,8 +956,10 @@ typedef NS_ENUM(NSInteger, BHTTwitterThemeVariant) {
 static BHTTwitterThemeVariant BHTCurrentTwitterThemeVariant(T1ProfileHeaderView *headerView) {
     UIUserInterfaceStyle style = UIUserInterfaceStyleLight;
 
-    if (headerView && @available(iOS 13.0, *)) {
-        style = headerView.traitCollection.userInterfaceStyle;
+    if (headerView) {
+        if (@available(iOS 13.0, *)) {
+            style = headerView.traitCollection.userInterfaceStyle;
+        }
     }
 
     // System / Twitter light theme
