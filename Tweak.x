@@ -123,52 +123,43 @@ static UISegmentedControl *BHT_findHomeSegmentControlInWindows(void) {
     return found;
 }
 
+// ホームタイムラインの「フォロー中」を自動選択するだけのシンプル版
 static void BHT_applyFollowingTabPreferenceForController(UIViewController *controller) {
     if (![BHTManager alwaysFollowingPage]) {
         return;
     }
-
-    UISegmentedControl *segmentedControl = nil;
-    if (controller.view) {
-        segmentedControl = BHT_findHomeSegmentControl(controller.view);
-    }
-    if (!segmentedControl) {
-        segmentedControl = BHT_findHomeSegmentControlInWindows();
-        if (!segmentedControl) return;
-    }
-
-    NSInteger forYouIndex = NSNotFound;
-    NSInteger followingIndex = NSNotFound;
-    for (NSInteger idx = 0; idx < segmentedControl.numberOfSegments; idx++) {
-        NSString *title = [segmentedControl titleForSegmentAtIndex:idx];
-        if (BHT_textMatchesForYou(title)) {
-            forYouIndex = idx;
-        } else if (BHT_textMatchesFollowing(title)) {
-            followingIndex = idx;
-        }
-    }
-
-    // 目標インデックス：フォロー中があればそこ、なければ現在値、さらにダメなら 0
-    NSInteger targetIndex = followingIndex;
-    if (targetIndex == NSNotFound) {
-        targetIndex = segmentedControl.selectedSegmentIndex;
-    }
-    if (targetIndex == NSNotFound) {
-        targetIndex = 0;
-    }
-
-    if (targetIndex < 0 || targetIndex >= segmentedControl.numberOfSegments) {
+    if (!controller) {
         return;
     }
 
-    NSInteger previousSelection = segmentedControl.selectedSegmentIndex;
-    segmentedControl.selectedSegmentIndex = targetIndex;
-
-    // 選択が変わったときだけイベントを飛ばす
-    if (previousSelection != targetIndex) {
-        [segmentedControl sendActionsForControlEvents:UIControlEventValueChanged];
+    UISegmentedControl *segmentedControl = BHT_findSegmentedControlInView(controller.view);
+    if (!segmentedControl) {
+        return;
     }
+
+    NSInteger followingIndex = NSNotFound;
+    for (NSInteger i = 0; i < segmentedControl.numberOfSegments; i++) {
+        NSString *title = [segmentedControl titleForSegmentAtIndex:i];
+        if (BHT_textMatchesFollowing(title)) {
+            followingIndex = i;
+            break;
+        }
+    }
+
+    if (followingIndex == NSNotFound) {
+        // 「フォロー中」セグメントが無い場合は何もしない
+        return;
+    }
+
+    if (segmentedControl.selectedSegmentIndex == followingIndex) {
+        // 既にフォロー中なら何もしない
+        return;
+    }
+
+    segmentedControl.selectedSegmentIndex = followingIndex;
+    [segmentedControl sendActionsForControlEvents:UIControlEventValueChanged];
 }
+
 
 
 static id BHT_safeValueForKey(id object, NSString *key) {
@@ -295,6 +286,42 @@ static BOOL BHT_isSearchTabController(UIViewController *controller) {
     return NO;
 }
 
+// あるビューから所属する UIViewController を探す
+static UIViewController *BHT_viewControllerForView(UIView *view) {
+    UIResponder *responder = view.nextResponder;
+    while (responder) {
+        if ([responder isKindOfClass:[UIViewController class]]) {
+            return (UIViewController *)responder;
+        }
+        responder = responder.nextResponder;
+    }
+    return nil;
+}
+
+// ツリー内から UITextField（検索バー）を1つ見つける
+static UITextField *BHT_findSearchTextFieldInView(UIView *view) {
+    if ([view isKindOfClass:[UITextField class]]) {
+        return (UITextField *)view;
+    }
+    for (UIView *sub in view.subviews) {
+        UITextField *found = BHT_findSearchTextFieldInView(sub);
+        if (found) {
+            return found;
+        }
+    }
+    return nil;
+}
+
+// 検索タブっぽい ViewController かざっくり判定
+static BOOL BHT_isSearchRootController(UIViewController *vc) {
+    if (!vc) return NO;
+    NSString *name = NSStringFromClass([vc class]);
+    name = [name lowercaseString];
+    return ([name containsString:@"search"] ||
+            [name containsString:@"explore"]);
+}
+
+
 static BOOL BHT_isLikelySearchContext(UIViewController *controller, NSString *location) {
     BOOL locationIsSearch = [location isKindOfClass:[NSString class]] &&
         ([location containsString:@"SEARCH"] || [location containsString:@"DISCOVER"]);
@@ -314,98 +341,32 @@ static BOOL BHT_isLikelySearchContext(UIViewController *controller, NSString *lo
 }
 
 // 検索タブ内の「トレンド / ニュース / おすすめモジュール」を隠すかどうか
-static BOOL BHT_shouldHideSearchTabItem(id itemViewModel, NSString *className)
-{
-    if (![BHTManager hideSearchTrends]) {
-        return NO;
-    }
-
-    if (!itemViewModel) {
-        return NO;
-    }
-
-    Class cls = [itemViewModel classForCoder];
-    if (className.length == 0) {
-        className = NSStringFromClass(cls);
-    }
-
-    NSString *lower = className.lowercaseString;
-
-    // 1) 検索結果ツイートは常に表示
-    if ([itemViewModel isKindOfClass:%c(T1URTTimelineStatusItemViewModel)]) {
-        return NO;
-    }
-
-    // 2) 検索結果のユーザーなどを残す（UserItemViewModel 系）
-    if ([lower containsString:@"useritemviewmodel"] ||
-        [lower containsString:@"useritem"] ||
-        [lower containsString:@"profileitem"]) {
-        return NO;
-    }
-
-    // 3) 検索履歴・サジェスト・クエリ候補っぽいものは残す
-    if ([lower containsString:@"recent"]  ||
-        [lower containsString:@"history"] ||
-        [lower containsString:@"suggest"] ||
-        [lower containsString:@"query"]   ||
-        [lower containsString:@"typeahead"]) {
-        return NO;
-    }
-
-    // 4) 明らかに「トレンド / ニュース / おすすめモジュール」っぽいものは隠す
-    if ([lower containsString:@"trend"]      ||
-        [lower containsString:@"explore"]    ||
-        [lower containsString:@"discovery"]  ||
-        [lower containsString:@"news"]       ||
-        [lower containsString:@"topic"]      ||
-        [lower containsString:@"carousel"]   ||
-        [lower containsString:@"moduleheader"] ||
-        [lower containsString:@"modulefooter"] ||
-        [cls isEqual:%c(_TtC10TwitterURT26URTTimelinePromptViewModel)] ||
-        [cls isEqual:%c(TwitterURT_URTModuleHeaderViewModel)] ||
-        [cls isEqual:%c(TwitterURT_URTModuleFooterViewModel)]) {
-        return YES;
-    }
-
-    // 5) フォールバック:
-    //   ・ツイートでもユーザーでも履歴でもなさそうなモジュールは非表示
-    return YES;
+static BOOL BHT_shouldHideSearchTabItem(id itemViewModel, NSString *className) {
+    // 新方式では TFNTableView 自体を hidden にするので、
+    // データレベルでは何も隠さない
+    return NO;
 }
 
 
-
-// 会話ビューの青バッジ返信を隠すかどうか
-static BOOL BHT_shouldHideBlueVerifiedReply(id itemViewModel,
-                                            NSIndexPath *indexPath,
-                                            UIViewController *controller)
+// 青バッジ返信非表示（シンプル版）
+// - 設定ON
+// - ユーザーが青バッジ
+// - 自分がフォローしていない
+// - 返信（indexPath.row != 0）
+// という条件を満たしたセルを非表示にする
+static BOOL BHT_shouldHideBlueVerifiedReply(UIViewController *controller,
+                                            id status,
+                                            NSIndexPath *indexPath)
 {
-    // 設定 OFF なら何もしない
     if (![BHTManager hideBlueReplies]) {
         return NO;
     }
-
-    // 会話ビュー以外では何もしない（誤爆防止）
-    if (!BHT_isInConversationContainerHierarchy(controller)) {
-        return NO;
-    }
-
-    if (!itemViewModel || !indexPath) {
-        return NO;
-    }
-
-    // 通常のタイムライン status のみ対象にする
-    if (![itemViewModel isKindOfClass:%c(T1URTTimelineStatusItemViewModel)]) {
-        return NO;
-    }
-
-    T1URTTimelineStatusItemViewModel *statusVM = itemViewModel;
-    id status = nil;
-
-    // クラッシュ防止で安全に取得
-    @try {
-        status = [statusVM valueForKey:@"status"];
-    } @catch (__unused NSException *e) { }
     if (!status) {
+        return NO;
+    }
+
+    // ルートツイート（会話の1つ目）は消さない
+    if (indexPath && indexPath.row == 0) {
         return NO;
     }
 
@@ -414,49 +375,18 @@ static BOOL BHT_shouldHideBlueVerifiedReply(id itemViewModel,
         return NO;
     }
 
-    // 著者の ID を NSMapTable に記録しておき、本人の返信は隠さない
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        BHTConversationAuthorIDs = [NSMapTable weakToStrongObjectsMapTable];
-    });
-
-    NSString *authorID = [BHTConversationAuthorIDs objectForKey:controller];
-    NSString *currentUserID = BHT_userIdentifierFromObject(user);
-
-    if (indexPath.row == 0 && currentUserID.length > 0) {
-        // 一番上のツイート（スレ主）を著者として記録
-        [BHTConversationAuthorIDs setObject:currentUserID forKey:controller];
-        authorID = currentUserID;
-    }
-
-    // 著者自身のツイートは絶対に隠さない
-    if (authorID.length > 0 && currentUserID.length > 0 &&
-        [authorID isEqualToString:currentUserID]) {
-        return NO;
-    }
-
-    // 青バッジでなければ対象外
     if (!BHT_userIsBlueVerified(user)) {
         return NO;
     }
 
-    // フォロー状態を確認
-    BOOL hasFollowInfo = NO;
-    BOOL isFollowed = BHT_userIsFollowed(user, &hasFollowInfo);
-
-    // フォロー情報が取れない場合は安全側で「隠さない」
-    if (!hasFollowInfo) {
+    if (BHT_isFollowingUser(user)) {
+        // 自分がフォローしている青バッジは残す
         return NO;
     }
 
-    // 自分がフォローしている青バッジは表示
-    if (isFollowed) {
-        return NO;
-    }
-
-    // ここまで来たら「青バッジ & フォローしていない」返信なので隠す
     return YES;
 }
+
 
 
 // MARK: imports to hook into Twitters TAE color system
@@ -5137,4 +5067,33 @@ static NSBundle *BHBundle() {
             self.tintColor = [UIColor blackColor];
         }
     }
+
+%hook TFNTableView
+
+- (void)layoutSubviews {
+    %orig;
+
+    @try {
+        if (![BHTManager hideSearchTrends]) {
+            return;
+        }
+
+        UIViewController *vc = BHT_viewControllerForView(self);
+        if (!BHT_isSearchRootController(vc)) {
+            // 検索タブ以外の TFNTableView には触らない
+            return;
+        }
+
+        UITextField *searchField = BHT_findSearchTextFieldInView(vc.view);
+        BOOL hasQuery = (searchField && searchField.text.length > 0);
+
+        // クエリが空のとき（＝検索トップ・トレンド画面）は隠す
+        // クエリがあるとき（検索中）は表示
+        self.hidden = !hasQuery;
+    }
+    @catch (__unused NSException *e) {
+        // 何かあってもクラッシュしないように
+    }
+}
+
 %end
