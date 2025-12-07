@@ -1117,32 +1117,27 @@ static void batchSwizzlingOnClass(Class cls, NSArray<NSString*>*origSelectors, I
 - (void)viewDidAppear:(BOOL)animated {
     %orig(animated);
 
-    @try {
-        // 設定が OFF なら何もしない
-        if (![BHTManager hideSearchTrends]) {
-            return;
-        }
+    if (self.view.window == nil) { return; }
 
-        // いま表示中の最前面 VC をざっくり取得
-        UIWindow *window = self.view.window ?: BHT_activeKeyWindow();
-        if (!window) {
-            return;
-        }
+    UIViewController *root = self.view.window.rootViewController;
+    UIViewController *top  = BHT_topViewController(root);
+    if (!top) { return; }
 
-        UIViewController *root = window.rootViewController;
-        UIViewController *top  = BHT_topViewController(root);
-        if (!top) {
-            return;
-        }
+    // 1) ホームタイムラインなら「フォロー中」タブを自動選択
+    if ([BHTManager alwaysFollowingPage] && BHT_isHomeTimelineController(top)) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            BHT_applyFollowingTabPreferenceForController(top);
+        });
+    }
 
-        // 「検索 / Explore」系画面っぽければタブをトレンド側に切り替える
+    // 2) 検索タブなら「トレンド」タブを自動選択
+    if ([BHTManager hideSearchTrends] && BHT_isSearchTabController(top)) {
         dispatch_async(dispatch_get_main_queue(), ^{
             BHT_applySearchTrendTabPreferenceForController(top);
         });
-    } @catch (__unused NSException *e) {
-        // ここでクラッシュしないように握りつぶしておく
     }
 }
+
 
 %end
 
