@@ -479,10 +479,6 @@ static BOOL BHT_isLikelySearchContext(UIViewController *controller, NSString *lo
 
 // 検索タブ内の「トレンド / ニュース / おすすめモジュール」を隠すかどうか
 static BOOL BHT_shouldHideSearchTabItem(id itemViewModel, NSString *className) {
-    // ここでは「どのクラスを隠すか」だけを見る。
-    // 実際に検索タブかどうかの判定や hideSearchTrends のフラグチェックは
-    // 呼び出し側（TFNItemsDataViewController）でやっている。
-
     NSString *resolvedClassName = className;
     if (!resolvedClassName && itemViewModel) {
         resolvedClassName = NSStringFromClass([itemViewModel classForCoder]);
@@ -1590,16 +1586,19 @@ static void BHTApplyCopyButtonStyle(UIButton *copyButton, T1ProfileHeaderView *h
     NSString *class_name = NSStringFromClass([tweet classForCoder]);
     NSIndexPath *indexPath = [arg2 isKindOfClass:[NSIndexPath class]] ? arg2 : nil;
 
+    // 検索タブかどうかの判定
     NSString *location = [self respondsToSelector:@selector(adDisplayLocation)] ? [self adDisplayLocation] : nil;
     BOOL isSearchContext = [BHTManager hideSearchTrends] && BHT_isLikelySearchContext((UIViewController *)self, location);
     BOOL shouldHideSearchItem = isSearchContext && BHT_shouldHideSearchTabItem(tweet, class_name);
 
-    if (shouldHideSearchItem) {
+    // ★ここで nil を返すとクラッシュするので、必ず一度セルを生成する
+    UITableViewCell *_orig = %orig;
+    if (!_orig) {
+        // 通常ここは通らないはずですが、防御的に
         return nil;
     }
 
-    UITableViewCell *_orig = %orig;
-
+    // 青バッジ返信の非表示判定
     BOOL shouldHideBlueReply = NO;
     @try {
         shouldHideBlueReply = BHT_shouldHideBlueVerifiedReply(tweet, indexPath);
@@ -1608,85 +1607,107 @@ static void BHTApplyCopyButtonStyle(UIButton *copyButton, T1ProfileHeaderView *h
         shouldHideBlueReply = NO;
     }
 
-    if (shouldHideBlueReply) {
-        return nil;
+    // 検索トレンド用の項目 or 青バッジ返信 → セルは返すが見えなくする
+    if (shouldHideSearchItem || shouldHideBlueReply) {
+        _orig.hidden = YES;
+        _orig.contentView.hidden = YES;
+        _orig.clipsToBounds = YES;
     }
 
-    if (shouldHideSearchItem) {
-        [_orig setHidden:true];
-    }
-
-    if ([BHTManager HidePromoted] && [tweet respondsToSelector:@selector(isPromoted)] && [tweet performSelector:@selector(isPromoted)]) {
-        [_orig setHidden:YES];
+    // ここから下は元のロジックをそのまま活かす（プロモ・おすすめなど）
+    if ([BHTManager HidePromoted] &&
+        [tweet respondsToSelector:@selector(isPromoted)] &&
+        [tweet performSelector:@selector(isPromoted)]) {
+        _orig.hidden = YES;
     }
 
     if ([self.adDisplayLocation isEqualToString:@"PROFILE_TWEETS"]) {
         if ([BHTManager hideWhoToFollow]) {
-            if ([class_name isEqualToString:@"T1URTTimelineUserItemViewModel"] || [class_name isEqualToString:@"T1TwitterSwift.URTTimelineCarouselViewModel"] || [class_name isEqualToString:@"TwitterURT.URTModuleHeaderViewModel"] || [class_name isEqualToString:@"TwitterURT.URTModuleFooterViewModel"]) {
-                [_orig setHidden:true];
+            if ([class_name isEqualToString:@"T1URTTimelineUserItemViewModel"] ||
+                [class_name isEqualToString:@"T1TwitterSwift.URTTimelineCarouselViewModel"] ||
+                [class_name isEqualToString:@"TwitterURT.URTModuleHeaderViewModel"] ||
+                [class_name isEqualToString:@"TwitterURT.URTModuleFooterViewModel"]) {
+                _orig.hidden = YES;
             }
         }
 
         if ([BHTManager hideTopicsToFollow]) {
-            if ([class_name isEqualToString:@"T1TwitterSwift.URTTimelineTopicCollectionViewModel"] || [class_name isEqualToString:@"TwitterURT.URTModuleHeaderViewModel"] || [class_name isEqualToString:@"TwitterURT.URTModuleFooterViewModel"] || [class_name isEqualToString:@"TwitterURT.URTTimelineCarouselViewModel"]) {
-                [_orig setHidden:true];
+            if ([class_name isEqualToString:@"T1TwitterSwift.URTTimelineTopicCollectionViewModel"] ||
+                [class_name isEqualToString:@"TwitterURT.URTModuleHeaderViewModel"] ||
+                [class_name isEqualToString:@"TwitterURT.URTModuleFooterViewModel"] ||
+                [class_name isEqualToString:@"TwitterURT.URTTimelineCarouselViewModel"]) {
+                _orig.hidden = YES;
             }
         }
     }
 
     if ([self.adDisplayLocation isEqualToString:@"OTHER"]) {
-        if ([BHTManager HidePromoted] && ([class_name isEqualToString:@"TwitterURT.URTModuleHeaderViewModel"] || [class_name isEqualToString:@"TwitterURT.URTModuleFooterViewModel"] || [class_name isEqualToString:@"T1URTTimelineMessageItemViewModel"])) {
-            [_orig setHidden:true];
+        if ([BHTManager HidePromoted] &&
+            ([class_name isEqualToString:@"TwitterURT.URTModuleHeaderViewModel"] ||
+             [class_name isEqualToString:@"TwitterURT.URTModuleFooterViewModel"] ||
+             [class_name isEqualToString:@"T1URTTimelineMessageItemViewModel"])) {
+            _orig.hidden = YES;
         }
 
-        if ([BHTManager HidePromoted] && [class_name isEqualToString:@"TwitterURT.URTTimelineEventSummaryViewModel"]) {
+        if ([BHTManager HidePromoted] &&
+            [class_name isEqualToString:@"TwitterURT.URTTimelineEventSummaryViewModel"]) {
             // Hide all EventSummaryViewModel items, not just promoted ones
-            [_orig setHidden:true];
+            _orig.hidden = YES;
         }
-        if ([BHTManager HidePromoted] && [class_name isEqualToString:@"TwitterURT.URTTimelineTrendViewModel"]) {
+
+        if ([BHTManager HidePromoted] &&
+            [class_name isEqualToString:@"TwitterURT.URTTimelineTrendViewModel"]) {
             _TtC10TwitterURT25URTTimelineTrendViewModel *trendModel = tweet;
             if ([[trendModel.scribeItem allKeys] containsObject:@"promoted_id"]) {
-                [_orig setHidden:true];
+                _orig.hidden = YES;
             }
         }
-        if ([BHTManager hideTrendVideos] && ([class_name isEqualToString:@"TwitterURT.URTModuleHeaderViewModel"] || [class_name isEqualToString:@"T1TwitterSwift.URTTimelineCarouselViewModel"])) {
-            [_orig setHidden:true];
+
+        if ([BHTManager hideTrendVideos] &&
+            ([class_name isEqualToString:@"TwitterURT.URTModuleHeaderViewModel"] ||
+             [class_name isEqualToString:@"TwitterURT.URTModuleFooterViewModel"] ||
+             [class_name isEqualToString:@"T1TwitterSwift.URTTimelineCarouselViewModel"])) {
+            _orig.hidden = YES;
         }
     }
 
     if ([self.adDisplayLocation isEqualToString:@"TIMELINE_HOME"]) {
         if ([tweet isKindOfClass:%c(T1URTTimelineStatusItemViewModel)]) {
             T1URTTimelineStatusItemViewModel *fullTweet = tweet;
+
             if ([BHTManager HideTopics]) {
-                if ((fullTweet.banner != nil) && [fullTweet.banner isKindOfClass:%c(TFNTwitterURTTimelineStatusTopicBanner)]) {
-                    [_orig setHidden:true];
+                if ((fullTweet.banner != nil) &&
+                    [fullTweet.banner isKindOfClass:%c(TFNTwitterURTTimelineStatusTopicBanner)]) {
+                    _orig.hidden = YES;
                 }
             }
         }
 
         if ([BHTManager HideTopics]) {
             if ([tweet isKindOfClass:%c(_TtC10TwitterURT26URTTimelinePromptViewModel)]) {
-                [_orig setHidden:true];
+                _orig.hidden = YES;
             }
         }
 
         if ([BHTManager hideWhoToFollow]) {
-            if ([class_name isEqualToString:@"T1URTTimelineUserItemViewModel"] || [class_name isEqualToString:@"T1TwitterSwift.URTTimelineCarouselViewModel"] || [class_name isEqualToString:@"TwitterURT.URTModuleHeaderViewModel"] || [class_name isEqualToString:@"TwitterURT.URTModuleFooterViewModel"]) {
-                [_orig setHidden:true];
+            if ([class_name isEqualToString:@"T1URTTimelineUserItemViewModel"] ||
+                [class_name isEqualToString:@"T1TwitterSwift.URTTimelineCarouselViewModel"] ||
+                [class_name isEqualToString:@"TwitterURT.URTModuleHeaderViewModel"] ||
+                [class_name isEqualToString:@"TwitterURT.URTModuleFooterViewModel"]) {
+                _orig.hidden = YES;
             }
         }
 
         if ([BHTManager hidePremiumOffer]) {
             if ([class_name isEqualToString:@"T1URTTimelineMessageItemViewModel"]) {
-                [_orig setHidden:true];
+                _orig.hidden = YES;
             }
         }
     }
 
-
-
     return _orig;
 }
+
 - (double)tableView:(id)arg1 heightForRowAtIndexPath:(id)arg2 {
     id tweet = [self itemAtIndexPath:arg2];
     NSString *class_name = NSStringFromClass([tweet classForCoder]);
