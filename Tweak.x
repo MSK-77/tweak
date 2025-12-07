@@ -1117,26 +1117,46 @@ static void batchSwizzlingOnClass(Class cls, NSArray<NSString*>*origSelectors, I
 - (void)viewDidAppear:(BOOL)animated {
     %orig(animated);
 
-    if (self.view.window == nil) { return; }
+    @try {
+        // window がまだ無い場合は何もしない
+        if (!self.view.window) {
+            return;
+        }
 
-    UIViewController *root = self.view.window.rootViewController;
-    UIViewController *top  = BHT_topViewController(root);
-    if (!top) { return; }
+        // いま表示中の最前面 VC をざっくり取得
+        UIViewController *root = self.view.window.rootViewController;
+        UIViewController *top  = BHT_topViewController(root);
+        if (!top) {
+            return;
+        }
 
-    // 1) ホームタイムラインなら「フォロー中」タブを自動選択
-    if ([BHTManager alwaysFollowingPage] && BHT_isHomeTimelineController(top)) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            BHT_applyFollowingTabPreferenceForController(top);
-        });
-    }
+        // 1) 「フォロー中」タブを自動選択（ホームタイムライン）
+        //
+        // BHT_applyFollowingTabPreferenceForController の内部で
+        // 「For you / フォロー中」の UISegmentedControl を探して
+        // セグメント名から判断してくれるので、
+        // ここではコンテキスト判定は不要です。
+        if ([BHTManager alwaysFollowingPage]) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                BHT_applyFollowingTabPreferenceForController(top);
+            });
+        }
 
-    // 2) 検索タブなら「トレンド」タブを自動選択
-    if ([BHTManager hideSearchTrends] && BHT_isSearchTabController(top)) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            BHT_applySearchTrendTabPreferenceForController(top);
-        });
+        // 2) 検索タブなら「トレンド」タブを自動選択
+        //
+        // こちらも BHT_applySearchTrendTabPreferenceForController 内で
+        // 「For you」かつ「トレンド」を含む UISegmentedControl だけを
+        // 探してくれるので、コンテキスト判定は不要です。
+        if ([BHTManager hideSearchTrends]) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                BHT_applySearchTrendTabPreferenceForController(top);
+            });
+        }
+    } @catch (__unused NSException *e) {
+        // 念のためクラッシュ防止
     }
 }
+
 
 
 %end
