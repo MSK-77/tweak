@@ -5319,68 +5319,151 @@ static NSBundle *BHBundle() {
 
 %end
 
-/*
-%hook TFNTableView
-
-- (void)layoutSubviews {
-    %orig;
-
-    @try {
-        if (![BHTManager hideSearchTrends]) {
-            return;
-        }
-
-        UIViewController *vc = BHT_viewControllerForView(self);
-        if (!BHT_isSearchRootController(vc)) {
-            // 検索タブ以外の TFNTableView には触らない
-            return;
-        }
-
-        UITextField *searchField = BHT_findSearchTextFieldInView(vc.view);
-        BOOL hasQuery = (searchField && searchField.text.length > 0);
-        BOOL isEditing = (searchField && searchField.isFirstResponder);
-
-        // トレンド/おすすめ部分のみ隠したいので、
-        // 1) 検索バーに文字が無く、
-        // 2) まだ検索バーが編集状態に入っていない（ホーム表示直後）
-        // という場合だけ隠す
-        BOOL shouldHide = (!hasQuery && !isEditing);
-        self.hidden = shouldHide;
+static inline BOOL BHT_hideSearchTrends(void) {
+    Class mgr = NSClassFromString(@"BHTManager");
+    if (mgr && [mgr respondsToSelector:@selector(hideSearchTrends)]) {
+        return ((BOOL(*)(id, SEL))objc_msgSend)(mgr, @selector(hideSearchTrends));
     }
-    @catch (__unused NSException *e) {
-        // 何かあってもクラッシュしないように
+    return NO;
+}
+static inline BOOL BHT_hideBlueReplies(void) {
+    Class mgr = NSClassFromString(@"BHTManager");
+    if (mgr && [mgr respondsToSelector:@selector(hideBlueReplies)]) {
+        return ((BOOL(*)(id, SEL))objc_msgSend)(mgr, @selector(hideBlueReplies));
     }
+    return NO;
+}
+
+// KVC を安全に読む（例外握りつぶし）
+static id BHT_KVC(id obj, NSString *key) {
+    if (!obj || !key) return nil;
+    @try { return [obj valueForKey:key]; } @catch (__unused NSException *e) { return nil; }
+}
+static BOOL BHT_KVCBool(id obj, NSString *key) {
+    id v = BHT_KVC(obj, key);
+    if ([v respondsToSelector:@selector(boolValue)]) return [v boolValue];
+    return NO;
+}
+
+// 挙動2：青バッジ返信か？（あなたの発見したキーに寄せる）
+static BOOL BHT_isBlueBadgeReplyViewModel(id vm) {
+    if (!vm || !BHT_hideBlueReplies()) return NO;
+
+    // いろんな階層があり得るので順に辿る
+    id statusVM = nil;
+
+    // 1) vm.statusViewModel があるケース
+    statusVM = BHT_KVC(vm, @"statusViewModel");
+
+    // 2) vm._viewModel.statusViewModel / vm.viewModel.statusViewModel のケース
+    if (!statusVM) {
+        id combined = BHT_KVC(vm, @"_viewModel");
+        if (!combined) combined = BHT_KVC(vm, @"viewModel");
+        if (combined) statusVM = BHT_KVC(combined, @"statusViewModel");
+    }
+
+    if (!statusVM) return NO;
+
+    BOOL isReply = BHT_KVCBool(statusVM, @"isReply");
+    BOOL isBlue  = BHT_KVCBool(statusVM, @"isFromUserBlueVerified");
+    return (isReply && isBlue);
+}
+
+// 挙動1：探索タブの「消したい系」か？（スクショのクラス名に基づく仮確定）
+static BOOL BHT_isExploreNoiseVM(id vm) {
+    if (!vm || !BHT_hideSearchTrends()) return NO;
+
+    NSString *cls = NSStringFromClass([vm class]);
+
+    if ([cls containsString:@"URTTimelineTrendViewModel"]) return YES;
+    if ([cls containsString:@"URTTimelineEventSummaryViewModel"]) return YES;
+    if ([cls containsString:@"T1URTTimelineUserItemViewModel"]) return YES;
+
+    // ここは周辺消える時だけ一緒に消す（単体では判断しない）
+    return NO;
+}
+
+static BOOL BHT_isHeaderOrFooterVM(id vm) {
+    if (!vm) return NO;
+    NSString *cls = NSStringFromClass([vm class]);
+    return ([cls containsString:@"URTModuleHeaderViewModel"] ||
+            [cls containsString:@"URTModuleFooterViewModel"]);
+}
+
+// 配列をフィルタする（挙動1 + 挙動2）
+static NSArray *BHT_filterArray(NSArray *inArr) {
+    if (![inArr isKindOfClass:[NSArray class]]) return inArr;
+    if (!BHT_hideSearchTrends() && !BHT_hideBlueReplies()) return inArr;
+
+    NSMutableArray *out = [NSMutableArray arrayWithCapacity:inArr.count];
+
+    // まず一次フィルタ：明確に消すVMと、青バッジ返信VMを落とす
+    NSMutableIndexSet *removed = [NSMutableIndexSet indexSet];
+    for (NSUInteger i = 0; i < inArr.count; i++) {
+        id vm = inArr[i];
+        if (BHT_isExploreNoiseVM(vm) || BHT_isBlueBadgeReplyViewModel(vm)) {
+            [removed addIndex:i];
+            continue;
+        }
+        [out addObject:vm];
+    }
+
+    // 二次フィルタ：ヘッダー/フッターは「隣が消えるなら」一緒に消す
+    if (BHT_hideSearchTrends() && removed.count > 0) {
+        NSMutableArray *out2 = [NSMutableArray arrayWithCapacity:out.count];
+
+        // 元配列の位置関係が崩れるので、ここは “元配列ベース” で判断して再構築する
+        for (NSUInteger i = 0; i < inArr.count; i++) {
+            if ([removed containsIndex:i]) continue;
+
+            id vm = inArr[i];
+            if (BHT_isHeaderOrFooterVM(vm)) {
+                BOOL neighborRemoved = NO;
+                if (i > 0 && [removed containsIndex:(i - 1)]) neighborRemoved = YES;
+                if ((i + 1) < inArr.count && [removed containsIndex:(i + 1)]) neighborRemoved = YES;
+
+                if (neighborRemoved) {
+                    continue; // 周囲が消えるなら、このヘッダー/フッターも消す
+                }
+            }
+            [out2 addObject:vm];
+        }
+        return out2;
+    }
+
+    return out;
+}
+
+%hook TFNItemsDataViewController
+
+// sections を “渡す側” があればここが一番効く
+- (void)setSections:(id)sections {
+    if ([sections isKindOfClass:[NSArray class]]) {
+        sections = BHT_filterArray((NSArray *)sections);
+    }
+    %orig(sections);
+}
+
+// “返す側” しかなければこちら
+- (id)sections {
+    id orig = %orig;
+    if ([orig isKindOfClass:[NSArray class]]) {
+        return BHT_filterArray((NSArray *)orig);
+    }
+    return orig;
 }
 
 %end
 
-// トレンド画面上部の水平ラベル群（おすすめトピックなど）を隠す
-%hook TFNScrollingHorizontalLabelCollectionView
-
-- (void)layoutSubviews {
-    %orig;
-
-    @try {
-        if (![BHTManager hideSearchTrends]) {
-            return;
-        }
-
-        UIViewController *vc = BHT_viewControllerForView(self);
-        if (!BHT_isSearchRootController(vc)) {
-            return;
-        }
-
-        UITextField *searchField = BHT_findSearchTextFieldInView(vc.view);
-        BOOL hasQuery = (searchField && searchField.text.length > 0);
-        BOOL isEditing = (searchField && searchField.isFirstResponder);
-
-        // 検索トップでのみ隠す。検索中や検索履歴表示中は表示する。
-        self.hidden = (!hasQuery && !isEditing);
-    }
-    @catch (__unused NSException *e) {
-        // fail-safe
-    }
+// もし別名で保持している環境向け（存在しなければ何もしない）
+%hook TFNItemsDataViewController
+- (void)setSectionViewModels:(id)v {
+    if ([v isKindOfClass:[NSArray class]]) v = BHT_filterArray((NSArray *)v);
+    %orig(v);
 }
-
+- (id)sectionViewModels {
+    id o = %orig;
+    if ([o isKindOfClass:[NSArray class]]) return BHT_filterArray((NSArray *)o);
+    return o;
+}
 %end
-*/
